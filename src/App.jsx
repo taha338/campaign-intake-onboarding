@@ -5,9 +5,69 @@ import Header from './components/Header';
 import SubjectTypeToggle from './components/SubjectTypeToggle';
 import { Section, TextField, TextArea, Select, RadioGroup, MultiSelectChips, TwoCol } from './components/Field';
 import {
+  SectionWeb, SectionKeyPeople, SectionContacts, SectionDomainDns, SectionEmailInfra,
+  SectionHosting, SectionDataCrm, SectionUsers, SectionProjectOps, SectionAnalyticsAds,
+  SectionCompliance, SectionFiling, SectionPartyMembership, SectionCoalition,
+  SectionPartyGovernance, SectionCounsel,
+} from './components/sections';
+import {
   SUBMITTER_ROLES, ORGANIZATION_TYPES, PARTY_TYPES, PARTY_SCOPES, US_STATES,
   TIME_ZONES, ELECTION_YEARS, PARTISAN_RACE_OPTIONS, YES_NO,
 } from './lib/options';
+
+function SubmitBlock() {
+  const { state, secrets, dispatch } = useIntake();
+  const submit = async () => {
+    dispatch({ type: 'SET_SUBMIT_STATE', payload: { submitting: true, submitError: '' } });
+    try {
+      const res = await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, secrets }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(body.slice(0, 300));
+      }
+      dispatch({ type: 'SET_SUBMIT_STATE', payload: { submitting: false, submitted: true } });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      dispatch({ type: 'SET_SUBMIT_STATE', payload: { submitting: false, submitError: err.message || 'Submit failed' } });
+    }
+  };
+
+  if (state.submitted) {
+    return (
+      <div className="my-12 p-8 rounded-2xl border border-emerald-200 bg-emerald-50 text-center">
+        <p className="font-display text-2xl text-emerald-900 uppercase mb-2">Submitted</p>
+        <p className="font-script text-xl text-emerald-700 mb-3">Thank you. We've got it.</p>
+        <p className="text-sm text-emerald-800">
+          Your campaign intake has been received. The Operation 1776 team will pick up from here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-12 p-6 rounded-2xl border border-[var(--color-op-line)] bg-white">
+      <p className="text-sm text-[var(--color-op-muted)] mb-4">
+        Once submitted, the Operation 1776 team will be notified in ClickUp and pick up
+        from here. You can return to this same link to edit anything later.
+      </p>
+      <button
+        type="button"
+        onClick={submit}
+        disabled={state.submitting}
+        className="font-display tracking-widest px-8 py-4 rounded-lg bg-[var(--color-op-red)] text-white uppercase text-lg shadow-lg hover:bg-[var(--color-op-red-deep)] disabled:bg-[var(--color-op-muted)] transition-colors"
+      >
+        {state.submitting ? 'Submitting…' : 'Submit Intake'}
+      </button>
+      {state.submitError && (
+        <p className="mt-3 text-sm text-red-700">{state.submitError}</p>
+      )}
+    </div>
+  );
+}
 
 function FormBody() {
   const { state, update, isParty, isCandidate, subjectChosen } = useIntake();
@@ -271,21 +331,27 @@ function FormBody() {
         />
       </Section>
 
-      {/* The remaining sections D–S are scaffolded in IntakeContext and will
-          render once we wire up additional Section components. For v0 we
-          render a placeholder so users see the form is in progress. */}
-      {subjectChosen && (
-        <Section index="D" title="More sections coming">
-          <div className="p-5 rounded-xl border border-dashed border-[var(--color-op-line)] bg-[var(--color-op-cream)] text-sm text-[var(--color-op-muted)]">
-            Sections D (Web), E (Key People), F (Contacts), G–O (operational
-            credentials with strict-RLS storage), P (filing), Q (party
-            membership), R (coalitions), S (governance) — all scaffolded in
-            state and rendering shortly.
-          </div>
-        </Section>
-      )}
+      {/* Sections D – S, Counsel */}
+      <SectionWeb />
+      <SectionKeyPeople />
+      <SectionContacts />
+      <SectionDomainDns />
+      <SectionEmailInfra />
+      <SectionHosting />
+      <SectionDataCrm />
+      <SectionUsers />
+      <SectionProjectOps />
+      <SectionAnalyticsAds />
+      <SectionCompliance />
+      <SectionFiling />
+      <SectionPartyMembership />
+      <SectionCoalition />
+      <SectionPartyGovernance />
+      <SectionCounsel />
 
-      {/* Footer / submit (stub for now) */}
+      {/* Submit */}
+      {subjectChosen && <SubmitBlock />}
+
       <footer className="mt-16 mb-10 pt-6 border-t border-[var(--color-op-line)] text-center text-xs text-[var(--color-op-muted)]">
         <p>
           Operation 1776 · Campaign Intake · {state.clientId ? `client ${state.clientId}` : 'no client_id loaded'}
