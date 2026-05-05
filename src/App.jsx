@@ -1,9 +1,20 @@
-import { useEffect, useState } from 'react';
+/**
+ * Form 1 — Campaign Intake (Operation 1776)
+ *
+ * Multi-stage wizard with 9 stages, framer-motion transitions, prev/next
+ * navigation, required-field validation, and "do you need this?" gates
+ * for optional stage bundles.
+ */
+import { useEffect } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { IntakeProvider, useIntake } from './context/IntakeContext';
 import { fetchPrefill, readClientIdFromUrl } from './lib/clickup';
 import Header from './components/Header';
+import ProgressBar from './components/ProgressBar';
+import StageShell from './components/StageShell';
 import SubjectTypeToggle from './components/SubjectTypeToggle';
-import { Section, TextField, TextArea, Select, RadioGroup, MultiSelectChips, TwoCol } from './components/Field';
+import OptInGate from './components/OptInGate';
+import { TextField, TextArea, Select, RadioGroup, MultiSelectChips, TwoCol } from './components/Field';
 import {
   SectionWeb, SectionKeyPeople, SectionContacts, SectionDomainDns, SectionEmailInfra,
   SectionHosting, SectionDataCrm, SectionUsers, SectionProjectOps, SectionAnalyticsAds,
@@ -12,10 +23,231 @@ import {
 } from './components/sections';
 import {
   SUBMITTER_ROLES, ORGANIZATION_TYPES, PARTY_TYPES, PARTY_SCOPES, US_STATES,
-  TIME_ZONES, ELECTION_YEARS, PARTISAN_RACE_OPTIONS, YES_NO,
+  TIME_ZONES, ELECTION_YEARS, PARTISAN_RACE_OPTIONS,
 } from './lib/options';
 
-function SubmitBlock() {
+/* Stage list — used by ProgressBar only. Each Stage* component computes
+   its own canContinue from state. */
+const STAGE_LIST = [
+  { id: 'subject',         label: 'Subject',          Component: () => <Stage1Subject /> },
+  { id: 'org',             label: 'Organization',     Component: () => <Stage2Org /> },
+  { id: 'race',             label: 'Race / Identity', Component: () => <Stage3Race /> },
+  { id: 'web-people',      label: 'Web & People',     Component: () => <Stage4WebPeople /> },
+  { id: 'infra',           label: 'Domain & Hosting', Component: () => <Stage5Infra /> },
+  { id: 'data-ops',        label: 'Data & Ops',       Component: () => <Stage6DataOps /> },
+  { id: 'compliance',      label: 'Compliance',       Component: () => <Stage7Compliance /> },
+  { id: 'subject-extras',  label: 'Subject Extras',   Component: () => <Stage8SubjectExtras /> },
+  { id: 'review',          label: 'Review',           Component: () => <Stage9Review /> },
+];
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 1 — Subject & Submitter (everything required)
+   ───────────────────────────────────────────────────────────────── */
+function Stage1Subject() {
+  const { state, update } = useIntake();
+  const canContinue = Boolean(state.subjectType && state.submitterName && state.submitterEmail && state.submitterRole);
+  return (
+    <StageShell number={1} title="Who's this for?" subtitle="A few quick details about you and your subject so we can tailor the rest of the form." isFirst canContinue={canContinue}>
+      <SubjectTypeToggle />
+      {(state.subjectType === 'candidate' || state.subjectType === 'party') && (
+        <div className="mt-6 space-y-5">
+          <TwoCol>
+            <TextField required label="Submitter Full Name" value={state.submitterName} onChange={(v) => update({ submitterName: v })} placeholder="Jane Doe" />
+            <TextField required label="Submitter Email" type="email" value={state.submitterEmail} onChange={(v) => update({ submitterEmail: v })} placeholder="jane@example.com" />
+          </TwoCol>
+          <TwoCol>
+            <Select required label="Submitter Role" value={state.submitterRole} onChange={(v) => update({ submitterRole: v })} options={SUBMITTER_ROLES} />
+            <TextField label="Referral Source" optional value={state.referralSource} onChange={(v) => update({ referralSource: v })} placeholder="How did you find us?" />
+          </TwoCol>
+        </div>
+      )}
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 2 — Organization Identity
+   ───────────────────────────────────────────────────────────────── */
+function Stage2Org() {
+  const { state, update, isCandidate } = useIntake();
+  const canContinue = Boolean(state.orgLegalName && state.orgType && state.mailingAddress);
+  return (
+    <StageShell number={2} title="Organization" subtitle="Legal name, type, and contact info for the registered org behind the brand." canContinue={canContinue}>
+      <TwoCol>
+        <TextField required label="Organization Legal Name" value={state.orgLegalName} onChange={(v) => update({ orgLegalName: v })} placeholder={isCandidate ? 'Friends of Jane Doe' : 'American Solidarity Party'} />
+        <TextField label="Display / Operation Name" optional value={state.displayName} onChange={(v) => update({ displayName: v })} help="If different from legal name." />
+      </TwoCol>
+      <Select required label="Organization Type" value={state.orgType} onChange={(v) => update({ orgType: v })} options={ORGANIZATION_TYPES} />
+      <TwoCol>
+        <TextField label="EIN / Tax ID" optional value={state.ein} onChange={(v) => update({ ein: v })} placeholder="93-1234567" />
+        <TextField label="FEC ID / State Committee ID" optional value={state.fecId} onChange={(v) => update({ fecId: v })} />
+      </TwoCol>
+      <TextArea required label="Mailing Address" value={state.mailingAddress} onChange={(v) => update({ mailingAddress: v })} placeholder="Street, City, State, Zip" rows={3} help="Doubles as the CAN-SPAM physical address on email." />
+      <TwoCol>
+        <TextField label="Organization Phone" type="tel" value={state.orgPhone} onChange={(v) => update({ orgPhone: v })} />
+        <TextField label="Organization Email" type="email" value={state.orgEmail} onChange={(v) => update({ orgEmail: v })} help="General / public inbox." />
+      </TwoCol>
+      <Select label="Time Zone" optional value={state.timeZone} onChange={(v) => update({ timeZone: v })} options={TIME_ZONES} />
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 3 — Race / Jurisdiction (candidate) or Party Identity (party)
+   ───────────────────────────────────────────────────────────────── */
+function Stage3Race() {
+  const { state, update, isCandidate, isParty } = useIntake();
+  const canContinue = isCandidate
+    ? Boolean(state.candidateFullLegalName && state.officeSought && state.candState && state.electionYear)
+    : Boolean(state.partyName && state.partyType && state.partyScope);
+  return (
+    <StageShell
+      number={3}
+      title={isCandidate ? 'Race & Jurisdiction' : 'Party Identity'}
+      subtitle={isCandidate ? 'Which office, where, and when.' : "What kind of party, and where it operates."}
+      canContinue={canContinue}
+    >
+      {isCandidate && (
+        <>
+          <TextField required label="Candidate Full Legal Name" value={state.candidateFullLegalName} onChange={(v) => update({ candidateFullLegalName: v })} help="As it would appear on a ballot." />
+          <TwoCol>
+            <TextField required label="Office Sought" value={state.officeSought} onChange={(v) => update({ officeSought: v })} placeholder="US House, State Senate, City Council" />
+            <Select required label="State" value={state.candState} onChange={(v) => update({ candState: v })} options={US_STATES} />
+          </TwoCol>
+          <TwoCol>
+            <TextField label="District" optional value={state.district} onChange={(v) => update({ district: v })} placeholder="e.g. CD-3" />
+            <Select required label="Election Year" value={state.electionYear} onChange={(v) => update({ electionYear: v })} options={ELECTION_YEARS} />
+          </TwoCol>
+          <RadioGroup label="Is this a partisan race?" value={state.partisanRace} onChange={(v) => update({ partisanRace: v })} options={PARTISAN_RACE_OPTIONS} />
+        </>
+      )}
+      {isParty && (
+        <>
+          <TwoCol>
+            <TextField required label="Party Name (full)" value={state.partyName} onChange={(v) => update({ partyName: v })} />
+            <TextField label="Party Acronym" optional value={state.partyAcronym} onChange={(v) => update({ partyAcronym: v.toUpperCase().slice(0, 8) })} placeholder="ASP, GOP, AFP" />
+          </TwoCol>
+          <RadioGroup required label="Party Type" value={state.partyType} onChange={(v) => update({ partyType: v })} options={PARTY_TYPES} />
+          {state.partyType === 'other' && (
+            <TextField label="Party Type — Other" value={state.partyTypeOther} onChange={(v) => update({ partyTypeOther: v })} />
+          )}
+          <RadioGroup required label="Party Scope" value={state.partyScope} onChange={(v) => update({ partyScope: v })} options={PARTY_SCOPES} />
+          {(state.partyScope === 'state' || state.partyScope === 'local') && (
+            <Select required label="Primary State" value={state.primaryStateParty} onChange={(v) => update({ primaryStateParty: v })} options={US_STATES} />
+          )}
+          {state.partyScope === 'multi-state' && (
+            <MultiSelectChips required label="States Covered" values={state.statesCovered} onChange={(v) => update({ statesCovered: v })} options={US_STATES} />
+          )}
+          {state.partyScope === 'local' && (
+            <TextField required label="City / County" value={state.cityCounty} onChange={(v) => update({ cityCounty: v })} placeholder="e.g. Travis County" />
+          )}
+          <TextField label="Founded Year" optional value={state.foundedYear} onChange={(v) => update({ foundedYear: v.replace(/[^0-9]/g, '').slice(0, 4) })} placeholder="YYYY" />
+        </>
+      )}
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 4 — Web Presence + Key People + Contacts
+   ───────────────────────────────────────────────────────────────── */
+function Stage4WebPeople() {
+  const { state } = useIntake();
+  const canContinue = Boolean(state.primaryWebsite && state.primaryName && state.primaryEmail);
+  return (
+    <StageShell number={4} title="Web & People" subtitle="The website you have, the people running this, and who we contact day-to-day." canContinue={canContinue}>
+      <SectionWeb />
+      <SectionKeyPeople />
+      <SectionContacts />
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 5 — Domain / DNS / Email / Hosting (skippable)
+   ───────────────────────────────────────────────────────────────── */
+function Stage5Infra() {
+  const { state, update } = useIntake();
+  const canContinue = state.optInDomainHostingEmail !== '';
+  return (
+    <StageShell number={5} title="Domain, Email, Hosting" subtitle="Skip this if Op1776 isn't handling these systems for you." canContinue={canContinue}>
+      <OptInGate
+        label="Do you want Op1776 to manage your domain, email, and hosting?"
+        help="Pick Yes to share the credentials we need. Pick No if you'll handle these yourself or already have a vendor."
+        yesLabel="Yes — share credentials"
+        noLabel="No — skip"
+        value={state.optInDomainHostingEmail}
+        onChange={(v) => update({ optInDomainHostingEmail: v })}
+      >
+        <SectionDomainDns />
+        <SectionEmailInfra />
+        <SectionHosting />
+      </OptInGate>
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 6 — Data, CRM, Users, Project Ops (skippable)
+   ───────────────────────────────────────────────────────────────── */
+function Stage6DataOps() {
+  const { state, update } = useIntake();
+  const canContinue = state.optInDataUsersOps !== '';
+  return (
+    <StageShell number={6} title="Data, Users & Ops" subtitle="Voter file, donor CRM, login users, project deadlines." canContinue={canContinue}>
+      <OptInGate
+        label="Do you have data systems / users / project deadlines to share?"
+        help="Most clients answer Yes. Pick No only if there's literally nothing to share here yet."
+        yesLabel="Yes — fill in"
+        noLabel="No — skip for now"
+        value={state.optInDataUsersOps}
+        onChange={(v) => update({ optInDataUsersOps: v })}
+      >
+        <SectionDataCrm />
+        <SectionUsers />
+        <SectionProjectOps />
+      </OptInGate>
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 7 — Compliance & Analytics (sender from name required)
+   ───────────────────────────────────────────────────────────────── */
+function Stage7Compliance() {
+  const { state } = useIntake();
+  const canContinue = Boolean(state.senderFromName);
+  return (
+    <StageShell number={7} title="Compliance & Analytics" subtitle="SMS / email compliance, ad accounts, and the 'From' name on outgoing email." canContinue={canContinue}>
+      <SectionAnalyticsAds />
+      <SectionCompliance />
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 8 — Subject-conditional extras (filing / party ops / coalition)
+   ───────────────────────────────────────────────────────────────── */
+function Stage8SubjectExtras() {
+  const { isCandidate, isParty } = useIntake();
+  return (
+    <StageShell
+      number={8}
+      title={isCandidate ? 'Filing & Coalition' : 'Party Ops & Coalition'}
+      subtitle={isCandidate ? 'Ballot access, signatures, and coalition outreach.' : 'Membership operations, governance, and coalition outreach.'}
+    >
+      {isCandidate && <SectionFiling />}
+      {isParty && <SectionPartyMembership />}
+      <SectionCoalition />
+      {isParty && <SectionPartyGovernance />}
+    </StageShell>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   STAGE 9 — Counsel + Review + Submit
+   ───────────────────────────────────────────────────────────────── */
+function Stage9Review() {
   const { state, secrets, dispatch } = useIntake();
   const submit = async () => {
     dispatch({ type: 'SET_SUBMIT_STATE', payload: { submitting: true, submitError: '' } });
@@ -38,398 +270,106 @@ function SubmitBlock() {
 
   if (state.submitted) {
     return (
-      <div className="my-12 p-8 rounded-2xl border border-emerald-200 bg-emerald-50 text-center">
-        <p className="font-display text-2xl text-emerald-900 uppercase mb-2">Submitted</p>
-        <p className="font-script text-xl text-emerald-700 mb-3">Thank you. We've got it.</p>
-        <p className="text-sm text-emerald-800">
-          Your campaign intake has been received. The Operation 1776 team will pick up from here.
-        </p>
-      </div>
+      <StageShell number={9} title="Submitted" subtitle="" hideContinue isLast>
+        <div className="p-8 rounded-2xl border border-emerald-200 bg-emerald-50 text-center">
+          <p className="font-display text-3xl text-emerald-900 uppercase mb-2">Thank you</p>
+          <p className="font-script text-2xl text-emerald-700 mb-3">We've got it.</p>
+          <p className="text-sm text-emerald-800">
+            Your campaign intake has been received. The Operation 1776 team will pick up from here.
+          </p>
+        </div>
+      </StageShell>
     );
   }
 
   return (
-    <div className="my-12 p-6 rounded-2xl border border-[var(--color-op-line)] bg-white">
-      <p className="text-sm text-[var(--color-op-muted)] mb-4">
-        Once submitted, the Operation 1776 team will be notified in ClickUp and pick up
-        from here. You can return to this same link to edit anything later.
-      </p>
-      <button
-        type="button"
-        onClick={submit}
-        disabled={state.submitting}
-        className="font-display tracking-widest px-8 py-4 rounded-lg bg-[var(--color-op-red)] text-white uppercase text-lg shadow-lg hover:bg-[var(--color-op-red-deep)] disabled:bg-[var(--color-op-muted)] transition-colors"
-      >
-        {state.submitting ? 'Submitting…' : 'Submit Intake'}
-      </button>
-      {state.submitError && (
-        <p className="mt-3 text-sm text-red-700">{state.submitError}</p>
-      )}
-    </div>
-  );
-}
-
-function FormBody() {
-  const { state, update, isParty, isCandidate, subjectChosen } = useIntake();
-
-  return (
-    <main className="max-w-3xl mx-auto px-6 py-10">
-      {/* Hero */}
-      <div className="mb-10 text-center">
-        <p className="op-section-num mb-2">SECTION 0 · KICKOFF</p>
-        <h2 className="font-display text-3xl md:text-5xl uppercase mb-3">
-          Campaign Intake
-        </h2>
-        <p className="font-script text-2xl text-[var(--color-op-red)] mb-4">
-          Let's get you on the ground.
-        </p>
-        <p className="text-sm text-[var(--color-op-muted)] max-w-xl mx-auto leading-relaxed">
-          This form captures the operational details we need to build, host, and
-          launch your campaign or party site. Most fields are optional — fill in
-          what you have, leave the rest blank.
-        </p>
-      </div>
-
-      {/* SECTION A — Submitter & Subject */}
-      <Section index="A" title="Subject & Submitter" subtitle="Who is this brand for, and who is filling out this form?">
-        <SubjectTypeToggle />
-        {!subjectChosen && (
-          <div className="p-4 rounded-lg border border-dashed border-[var(--color-op-line)] bg-[var(--color-op-cream)] text-sm text-[var(--color-op-muted)]">
-            Pick a subject type above to continue.
-          </div>
-        )}
-        {subjectChosen && (
-          <>
-            <TwoCol>
-              <TextField
-                label="Submitter Full Name"
-                value={state.submitterName}
-                onChange={(v) => update({ submitterName: v })}
-                placeholder="Jane Doe"
-              />
-              <TextField
-                label="Submitter Email"
-                type="email"
-                value={state.submitterEmail}
-                onChange={(v) => update({ submitterEmail: v })}
-                placeholder="jane@example.com"
-              />
-            </TwoCol>
-            <TwoCol>
-              <Select
-                label="Submitter Role"
-                value={state.submitterRole}
-                onChange={(v) => update({ submitterRole: v })}
-                options={SUBMITTER_ROLES}
-              />
-              <TextField
-                label="Referral Source"
-                optional
-                value={state.referralSource}
-                onChange={(v) => update({ referralSource: v })}
-                placeholder="How did you find us?"
-              />
-            </TwoCol>
-          </>
-        )}
-      </Section>
-
-      {/* SECTION B — Organization Identity */}
-      <Section index="B" title="Organization Identity" hidden={!subjectChosen}>
-        <TwoCol>
-          <TextField
-            label="Organization Legal Name"
-            value={state.orgLegalName}
-            onChange={(v) => update({ orgLegalName: v })}
-            placeholder={isCandidate ? 'Friends of Jane Doe' : 'American Solidarity Party'}
-            help={isCandidate ? 'Your committee\'s registered legal name.' : 'The party / org\'s legal name.'}
-          />
-          <TextField
-            label="Display / Operation Name"
-            optional
-            value={state.displayName}
-            onChange={(v) => update({ displayName: v })}
-            placeholder={isCandidate ? 'Jane Doe for Senate' : 'ASP'}
-            help="If different from legal name. Used as the public-facing name on the site."
-          />
-        </TwoCol>
-
-        <Select
-          label="Organization Type"
-          value={state.orgType}
-          onChange={(v) => update({ orgType: v })}
-          options={ORGANIZATION_TYPES}
-        />
-
-        {/* Party-only block */}
-        {isParty && (
-          <>
-            <TwoCol>
-              <TextField
-                label="Party Name (full)"
-                value={state.partyName}
-                onChange={(v) => update({ partyName: v })}
-              />
-              <TextField
-                label="Party Acronym"
-                value={state.partyAcronym}
-                onChange={(v) => update({ partyAcronym: v.toUpperCase().slice(0, 8) })}
-                placeholder="ASP, GOP, AFP"
-              />
-            </TwoCol>
-            <RadioGroup
-              label="Party Type"
-              value={state.partyType}
-              onChange={(v) => update({ partyType: v })}
-              options={PARTY_TYPES}
-            />
-            {state.partyType === 'other' && (
-              <TextField
-                label="Party Type — Other"
-                value={state.partyTypeOther}
-                onChange={(v) => update({ partyTypeOther: v })}
-              />
-            )}
-            <RadioGroup
-              label="Party Scope"
-              value={state.partyScope}
-              onChange={(v) => update({ partyScope: v })}
-              options={PARTY_SCOPES}
-            />
-            {(state.partyScope === 'state' || state.partyScope === 'local') && (
-              <Select
-                label="Primary State"
-                value={state.primaryStateParty}
-                onChange={(v) => update({ primaryStateParty: v })}
-                options={US_STATES}
-              />
-            )}
-            {state.partyScope === 'multi-state' && (
-              <MultiSelectChips
-                label="States Covered"
-                values={state.statesCovered}
-                onChange={(v) => update({ statesCovered: v })}
-                options={US_STATES}
-                help="Click each state your party operates in."
-              />
-            )}
-            {state.partyScope === 'local' && (
-              <TextField
-                label="City / County"
-                value={state.cityCounty}
-                onChange={(v) => update({ cityCounty: v })}
-                placeholder="e.g. Travis County, City of Boise"
-              />
-            )}
-            <TextField
-              label="Founded Year"
-              optional
-              value={state.foundedYear}
-              onChange={(v) => update({ foundedYear: v.replace(/[^0-9]/g, '').slice(0, 4) })}
-              placeholder="YYYY"
-            />
-          </>
-        )}
-
-        <TwoCol>
-          <TextField
-            label="EIN / Tax ID"
-            optional
-            value={state.ein}
-            onChange={(v) => update({ ein: v })}
-            placeholder="93-1234567"
-          />
-          <TextField
-            label="FEC ID / State Committee ID"
-            optional
-            value={state.fecId}
-            onChange={(v) => update({ fecId: v })}
-          />
-        </TwoCol>
-
-        <TextArea
-          label="Mailing Address"
-          value={state.mailingAddress}
-          onChange={(v) => update({ mailingAddress: v })}
-          placeholder="Street, City, State, Zip"
-          rows={3}
-          help="Used for the CAN-SPAM disclosure on email and as the org's official address."
-        />
-
-        <TwoCol>
-          <TextField
-            label="Organization Phone"
-            type="tel"
-            value={state.orgPhone}
-            onChange={(v) => update({ orgPhone: v })}
-            placeholder="+1 (555) 555-1234"
-          />
-          <TextField
-            label="Organization Email"
-            type="email"
-            value={state.orgEmail}
-            onChange={(v) => update({ orgEmail: v })}
-            placeholder="contact@example.com"
-            help="General / public inbox."
-          />
-        </TwoCol>
-
-        <Select
-          label="Time Zone"
-          value={state.timeZone}
-          onChange={(v) => update({ timeZone: v })}
-          options={TIME_ZONES}
-        />
-      </Section>
-
-      {/* SECTION C — Race / Jurisdiction (candidate-only) */}
-      <Section
-        index="C"
-        title="Race & Jurisdiction"
-        hidden={!isCandidate}
-      >
-        <TextField
-          label="Candidate Full Legal Name"
-          value={state.candidateFullLegalName}
-          onChange={(v) => update({ candidateFullLegalName: v })}
-          help="As it would appear on a ballot."
-        />
-        <TwoCol>
-          <TextField
-            label="Office Sought"
-            value={state.officeSought}
-            onChange={(v) => update({ officeSought: v })}
-            placeholder="e.g. US House, State Senate, City Council"
-          />
-          <Select
-            label="State"
-            value={state.candState}
-            onChange={(v) => update({ candState: v })}
-            options={US_STATES}
-          />
-        </TwoCol>
-        <TwoCol>
-          <TextField
-            label="District"
-            optional
-            value={state.district}
-            onChange={(v) => update({ district: v })}
-            placeholder="e.g. CD-3"
-          />
-          <Select
-            label="Election Year"
-            value={state.electionYear}
-            onChange={(v) => update({ electionYear: v })}
-            options={ELECTION_YEARS}
-          />
-        </TwoCol>
-        <RadioGroup
-          label="Is this a partisan race?"
-          value={state.partisanRace}
-          onChange={(v) => update({ partisanRace: v })}
-          options={PARTISAN_RACE_OPTIONS}
-        />
-      </Section>
-
-      {/* Sections D – S, Counsel */}
-      <SectionWeb />
-      <SectionKeyPeople />
-      <SectionContacts />
-      <SectionDomainDns />
-      <SectionEmailInfra />
-      <SectionHosting />
-      <SectionDataCrm />
-      <SectionUsers />
-      <SectionProjectOps />
-      <SectionAnalyticsAds />
-      <SectionCompliance />
-      <SectionFiling />
-      <SectionPartyMembership />
-      <SectionCoalition />
-      <SectionPartyGovernance />
+    <StageShell
+      number={9}
+      title="Review & Submit"
+      subtitle="One last review, then we take it from here."
+      isLast
+      hideContinue
+    >
       <SectionCounsel />
-
-      {/* Submit */}
-      {subjectChosen && <SubmitBlock />}
-
-      <footer className="mt-16 mb-10 pt-6 border-t border-[var(--color-op-line)] text-center text-xs text-[var(--color-op-muted)]">
-        <p>
-          Operation 1776 · Campaign Intake · {state.clientId ? `client ${state.clientId}` : 'no client_id loaded'}
+      <div className="p-6 rounded-2xl border border-[var(--color-op-line)] bg-white">
+        <p className="text-sm text-[var(--color-op-muted)] mb-4">
+          Submitting writes to Supabase and notifies the Operation 1776 team in ClickUp.
+          You can return to this same link to edit anything later.
         </p>
-      </footer>
-    </main>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={state.submitting}
+          className="font-display tracking-widest px-8 py-4 rounded-lg bg-[var(--color-op-red)] text-white uppercase text-lg shadow-lg hover:bg-[var(--color-op-red-deep)] disabled:bg-[var(--color-op-muted)] transition-colors"
+        >
+          {state.submitting ? 'Submitting…' : 'Submit Intake'}
+        </button>
+        {state.submitError && (
+          <p className="mt-3 text-sm text-red-700">{state.submitError}</p>
+        )}
+      </div>
+    </StageShell>
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   PrefillBoot + Wizard wrapper
+   ───────────────────────────────────────────────────────────────── */
 function PrefillBoot() {
   const { state, dispatch } = useIntake();
-
   useEffect(() => {
     const cid = readClientIdFromUrl();
     dispatch({ type: 'UPDATE', payload: { clientId: cid } });
-    if (!cid) {
-      dispatch({ type: 'SET_PREFILL_STATUS', payload: { status: 'empty' } });
-      return;
-    }
-    dispatch({ type: 'SET_PREFILL_STATUS', payload: { status: 'loading' } });
+    if (!cid) return;
     fetchPrefill(cid)
       .then((data) => {
-        if (!data) return;
-        // Map ClickUp prefill payload → our state shape.
-        const payload = {
-          clickupTaskId: data.taskId || '',
-          submitterName: data.contact?.name || data.candidate?.fullName || '',
-          submitterEmail: data.contact?.email || '',
-          orgLegalName: data.party?.name || data.candidate?.organizationName || '',
-          displayName: data.tradeName || '',
-          orgPhone: data.contact?.phone || '',
-          // These are all best-effort — real prefill mapping will expand once
-          // we know the exact custom field names from the master task.
-        };
-        dispatch({ type: 'PREFILL', payload });
+        if (!data?.found) return;
+        dispatch({
+          type: 'PREFILL',
+          payload: {
+            clickupTaskId: data.taskId || '',
+            submitterName: data.contact?.name || '',
+            submitterEmail: data.contact?.email || '',
+            primaryName: data.contact?.name || '',
+            primaryEmail: data.contact?.email || '',
+            primaryPhone: data.contact?.phone || '',
+            displayName: data.tradeName || '',
+          },
+        });
       })
-      .catch((err) => {
-        // Don't block the form on prefill errors; user can still fill manually.
-        dispatch({ type: 'SET_PREFILL_STATUS', payload: { status: 'error', error: err.message } });
-      });
+      .catch(() => { /* silent — form remains fillable */ });
   }, [dispatch]);
-
-  if (state.prefillStatus === 'loading') {
-    return (
-      <div className="bg-amber-50 border-y border-amber-200 text-amber-900 text-xs no-print">
-        <div className="max-w-5xl mx-auto px-6 py-2">Loading client data from ClickUp…</div>
-      </div>
-    );
-  }
-  if (state.prefillStatus === 'error') {
-    return (
-      <div className="bg-red-50 border-y border-red-200 text-red-900 text-xs no-print">
-        <div className="max-w-5xl mx-auto px-6 py-2">
-          Couldn't pre-fill from ClickUp ({state.prefillError}). You can still complete the form manually.
-        </div>
-      </div>
-    );
-  }
-  if (state.prefillStatus === 'empty') {
-    return (
-      <div className="bg-amber-50 border-y border-amber-200 text-amber-900 text-xs no-print">
-        <div className="max-w-5xl mx-auto px-6 py-2">
-          No <code className="font-mono">?client_id=</code> in URL. Use the link from your
-          ClickUp task to auto-fill known information.
-        </div>
-      </div>
-    );
-  }
   return null;
+}
+
+function Wizard() {
+  const { state } = useIntake();
+  const Stage = STAGE_LIST[state.currentStage]?.Component;
+  return (
+    <>
+      <ProgressBar stages={STAGE_LIST} />
+      <AnimatePresence mode="wait">
+        {Stage && <Stage key={state.currentStage} />}
+      </AnimatePresence>
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   App entry
+   ───────────────────────────────────────────────────────────────── */
+function HeaderWithClient() {
+  const { state } = useIntake();
+  return <Header subjectLabel="Campaign Intake" clientId={state.clientId} />;
 }
 
 export default function App() {
   return (
     <IntakeProvider>
       <div className="op-paper min-h-screen pb-20">
-        <Header />
+        <HeaderWithClient />
         <PrefillBoot />
-        <FormBody />
+        <Wizard />
       </div>
     </IntakeProvider>
   );

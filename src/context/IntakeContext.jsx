@@ -17,6 +17,13 @@ const initialState = {
   prefillStatus: 'idle',      // idle | loading | success | error | empty
   prefillError: '',
 
+  // ── Wizard navigation
+  currentStage: 0,
+  completedStages: [],
+  // Optional-section toggles (user opts in to a bundle if relevant)
+  optInDomainHostingEmail: '',  // 'yes' | 'no' | ''
+  optInDataUsersOps: '',        // 'yes' | 'no' | ''
+
   // ── A. Submitter & Subject
   subjectType: '',            // candidate | party (drives all conditionals)
   submitterName: '',
@@ -217,6 +224,16 @@ function reducer(state, action) {
       return { ...state, [action.field]: state[action.field].filter((_, i) => i !== action.index) };
     case 'SET_SUBMIT_STATE':
       return { ...state, ...action.payload };
+    case 'SET_STAGE':
+      return { ...state, currentStage: action.payload };
+    case 'NEXT_STAGE':
+      return {
+        ...state,
+        completedStages: [...new Set([...state.completedStages, state.currentStage])],
+        currentStage: state.currentStage + 1,
+      };
+    case 'PREV_STAGE':
+      return { ...state, currentStage: Math.max(0, state.currentStage - 1) };
     default:
       return state;
   }
@@ -246,6 +263,16 @@ export function IntakeProvider({ children }) {
   const isCandidate = state.subjectType === 'candidate';
   const subjectChosen = isParty || isCandidate;
 
+  const goToStage = useCallback((s) => dispatch({ type: 'SET_STAGE', payload: s }), []);
+  const nextStage = useCallback(() => {
+    dispatch({ type: 'NEXT_STAGE' });
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
+  const prevStage = useCallback(() => {
+    dispatch({ type: 'PREV_STAGE' });
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
+
   const value = useMemo(() => ({
     state,
     secrets,
@@ -259,7 +286,10 @@ export function IntakeProvider({ children }) {
     isParty,
     isCandidate,
     subjectChosen,
-  }), [state, secrets, update, updateSecret, updateRepeating, addRepeating, removeRepeating, isParty, isCandidate, subjectChosen]);
+    goToStage,
+    nextStage,
+    prevStage,
+  }), [state, secrets, update, updateSecret, updateRepeating, addRepeating, removeRepeating, isParty, isCandidate, subjectChosen, goToStage, nextStage, prevStage]);
 
   return <IntakeContext.Provider value={value}>{children}</IntakeContext.Provider>;
 }

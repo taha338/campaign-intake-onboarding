@@ -23,7 +23,7 @@ export function SectionWeb() {
   const { state, update, isParty, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="D" title="Web Presence">
+    <Section defaultOpen index="D" title="Web Presence">
       <TwoCol>
         <TextField
           label="Primary Website URL"
@@ -89,7 +89,7 @@ export function SectionKeyPeople() {
   const { state, update, isParty, isCandidate, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="E" title="Key People" subtitle="Who runs day-to-day operations.">
+    <Section defaultOpen index="E" title="Key People" subtitle="Who runs day-to-day operations.">
       {isCandidate && (
         <>
           <TwoCol>
@@ -175,7 +175,7 @@ export function SectionContacts() {
   const { state, update, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="F" title="Primary &amp; Secondary Contacts">
+    <Section defaultOpen index="F" title="Primary &amp; Secondary Contacts">
       <RadioGroup
         label="Same person for Primary and Secondary?"
         value={state.samePersonContacts}
@@ -270,7 +270,7 @@ export function SectionEmailInfra() {
   const { secrets, updateSecret, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="H" title="Email Infrastructure">
+    <Section defaultOpen index="H" title="Email Infrastructure">
       <TwoCol>
         <TextField
           label="Email Admin Username"
@@ -309,7 +309,7 @@ export function SectionHosting() {
   const { state, secrets, update, updateSecret, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="I" title="Existing Site &amp; Hosting">
+    <Section defaultOpen index="I" title="Existing Site &amp; Hosting">
       {state.websiteLive === 'Yes' && (
         <>
           <TextField
@@ -389,7 +389,7 @@ export function SectionDataCrm() {
   const { state, secrets, update, updateSecret, isParty, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="J" title="Data &amp; CRM Systems">
+    <Section defaultOpen index="J" title="Data &amp; CRM Systems">
       <TextArea
         label="Voter File / VAN Access"
         secret
@@ -459,7 +459,7 @@ export function SectionUsers() {
   const { state, updateRepeating, addRepeating, removeRepeating, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="K" title="User Provisioning" subtitle="Add anyone who needs login access to the new site.">
+    <Section defaultOpen index="K" title="User Provisioning" subtitle="Add anyone who needs login access to the new site.">
       <RepeatingBlock
         items={state.users}
         onAdd={() => addRepeating('users', { name: '', email: '', accessLevel: '', role: '' })}
@@ -506,7 +506,7 @@ export function SectionProjectOps() {
   const { state, update, updateRepeating, addRepeating, removeRepeating, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="M" title="Project Operations">
+    <Section defaultOpen index="M" title="Project Operations">
       <TextField
         label="Launch deadline / target date"
         type="date"
@@ -572,7 +572,7 @@ export function SectionAnalyticsAds() {
   const { secrets, updateSecret, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="N" title="Analytics &amp; Ad Accounts" subtitle="All access notes are stored as secrets with strict RLS.">
+    <Section defaultOpen index="N" title="Analytics &amp; Ad Accounts" subtitle="All access notes are stored as secrets with strict RLS.">
       <TwoCol>
         <TextArea label="GA4 access" secret optional value={secrets.ga4Access} onChange={(v) => updateSecret({ ga4Access: v })} help="Property ID + delegated access" />
         <TextArea label="Google Tag Manager access" secret optional value={secrets.gtmAccess} onChange={(v) => updateSecret({ gtmAccess: v })} help="Container ID + delegated access" />
@@ -591,7 +591,7 @@ export function SectionCompliance() {
   const { state, secrets, update, updateSecret, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="O" title="SMS &amp; Email Compliance">
+    <Section defaultOpen index="O" title="SMS &amp; Email Compliance">
       <TextArea
         label="10DLC brand registration info"
         secret
@@ -639,7 +639,7 @@ export function SectionFiling() {
   const { state, secrets, update, updateSecret, isCandidate } = useIntake();
   if (!isCandidate) return null;
   return (
-    <Section index="P" title="Filing &amp; Ballot Access">
+    <Section defaultOpen index="P" title="Filing &amp; Ballot Access">
       <RadioGroup
         label="Filed for office?"
         value={state.filedForOffice}
@@ -690,7 +690,7 @@ export function SectionPartyMembership() {
   const { state, secrets, update, updateSecret, isParty } = useIntake();
   if (!isParty) return null;
   return (
-    <Section index="Q" title="Party Membership &amp; Affiliates">
+    <Section defaultOpen index="Q" title="Party Membership &amp; Affiliates">
       <TwoCol>
         <Select
           label="Member portal platform"
@@ -763,7 +763,7 @@ export function SectionCoalition() {
   const { state, updateRepeating, addRepeating, removeRepeating, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="R" title="Coalition Outreach Leads" subtitle="Add the lead point of contact for each coalition you actively work with.">
+    <Section defaultOpen index="R" title="Coalition Outreach Leads" subtitle="Add the lead point of contact for each coalition you actively work with.">
       <RepeatingBlock
         items={state.coalitionLeads}
         onAdd={() => addRepeating('coalitionLeads', { category: '', name: '', contact: '' })}
@@ -802,7 +802,7 @@ export function SectionPartyGovernance() {
   const { state, secrets, update, updateSecret, updateRepeating, addRepeating, removeRepeating, isParty } = useIntake();
   if (!isParty) return null;
   return (
-    <Section index="S" title="Party Governance Ops">
+    <Section defaultOpen index="S" title="Party Governance Ops">
       <RepeatingBlock
         label="Internal committee chairs"
         items={state.internalCommitteeChairs}
@@ -854,7 +854,7 @@ export function SectionCounsel() {
   const { state, update, subjectChosen } = useIntake();
   if (!subjectChosen) return null;
   return (
-    <Section index="T" title="Counsel">
+    <Section defaultOpen index="T" title="Counsel">
       <TwoCol>
         <TextField
           label="Campaign / General Counsel — Name"
