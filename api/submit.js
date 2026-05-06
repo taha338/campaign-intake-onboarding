@@ -1,25 +1,33 @@
 /**
- * POST /api/submit
+ * POST /api/submit  — Form 1 (Campaign Intake)
  *
- * Body: { state, secrets }
- *
- * 1. Validate client_id matches a real ClickUp Active Clients task.
- * 2. Insert non-secret fields into Supabase `campaign_intakes`.
- * 3. Insert secret fields into `campaign_intake_secrets` (strict RLS, service role).
- * 4. (Best-effort) update the matching ClickUp Campaign Onboarding Form task
- *    with all custom field values + flip status to 'complete'.
- * 5. (Best-effort) POST to the Apps Script Sheets endpoint.
+ * Pipeline:
+ *   1. Validate clientId + subject type.
+ *   2. Insert main row into Supabase `campaign_intakes`.
+ *   3. Insert any present credentials into `campaign_intake_secrets`.
+ *   4. Best-effort ClickUp:
+ *        a. Find Active Clients master task by clientId.
+ *        b. Create new task in NEW---Campaign Intake Form list with rich
+ *           markdown description, link to Active Clients via Linked Client.
+ *        c. Update Active Clients master with Subject Type, Submitted-At,
+ *           Supabase Row ID.
+ *   5. Best-effort Sheets webhook.
  *
  * Required env vars:
  *   - SUPABASE_URL
- *   - SUPABASE_SERVICE_ROLE_KEY     (server-side only — never client)
+ *   - SUPABASE_SECRET_KEY     (server-side only — never client)
  *   - CLICKUP_API_TOKEN
  * Optional:
- *   - CLICKUP_CAMPAIGN_FORM_LIST_ID  default: 901113628488
- *   - SHEETS_WEBHOOK_URL             Apps Script web endpoint
+ *   - SHEETS_WEBHOOK_URL      Apps Script web endpoint
  */
 
 import { createClient } from '@supabase/supabase-js';
+import {
+  PRIMARY_LIST_ID,
+  ACTIVE_CLIENTS_LIST_ID,
+  ACTIVE_CLIENTS_FIELD_IDS,
+  FIELD_IDS,
+} from './clickup-field-map.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -28,40 +36,35 @@ export default async function handler(req, res) {
   }
 
   let body;
-  try {
-    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-  } catch {
-    return res.status(400).json({ error: 'Invalid JSON body' });
-  }
+  try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
+  catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
 
   const { state = {}, secrets = {} } = body || {};
-  const clientId = (state.clientId || '').toString().trim();
-  if (!clientId) {
-    return res.status(400).json({ error: 'clientId is required (no ?client_id in URL?).' });
+  const clientId = String(state.clientId || '').trim();
+  if (!clientId || !/^[A-Za-z0-9_-]{1,40}$/.test(clientId)) {
+    return res.status(400).json({ error: 'Valid clientId required' });
   }
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(clientId)) {
-    return res.status(400).json({ error: 'Invalid clientId format' });
-  }
-  if (!state.subjectType || !['candidate', 'party'].includes(state.subjectType)) {
+  if (!['candidate', 'party'].includes(state.subjectType)) {
     return res.status(400).json({ error: 'Subject type required.' });
   }
 
   const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceKey) {
+  const secretKey   = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !secretKey) {
     return res.status(500).json({ error: 'Supabase env vars not configured.' });
   }
-  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+  const supabase = createClient(supabaseUrl, secretKey, { auth: { persistSession: false } });
 
-  // 1) Insert main row.
+  // 1) Main row into Supabase
+  const submittedAt = new Date().toISOString();
   const { data: row, error: rowErr } = await supabase
     .from('campaign_intakes')
     .insert([{
-      client_id:     clientId,
+      client_id:       clientId,
       clickup_task_id: state.clickupTaskId || null,
-      submitted_at:  new Date().toISOString(),
-      subject_type:  state.subjectType,
-      payload:       state,        // jsonb full snapshot
+      submitted_at:    submittedAt,
+      subject_type:    state.subjectType,
+      payload:         state,
     }])
     .select()
     .single();
@@ -69,57 +72,182 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Supabase insert failed', detail: rowErr.message });
   }
 
-  // 2) Insert secrets (separate table, RLS allows only service role to read).
+  // 2) Secrets — separate strict-RLS table
   const hasSecrets = Object.values(secrets || {}).some(Boolean);
   if (hasSecrets) {
     const { error: secErr } = await supabase
       .from('campaign_intake_secrets')
       .insert([{
-        client_id:    clientId,
+        client_id:     clientId,
         intake_row_id: row.id,
-        submitted_at: new Date().toISOString(),
-        payload:      secrets,
+        submitted_at:  submittedAt,
+        payload:       secrets,
       }]);
-    if (secErr) {
-      // Don't fail the whole submission — log and surface.
-      console.error('Secrets insert failed:', secErr);
-    }
+    if (secErr) console.error('[campaign-intake] secrets insert failed:', secErr);
   }
 
-  // 3) Best-effort ClickUp + Sheets sync. We don't fail the form if these fail;
-  //    Supabase has the canonical row.
+  // 3) ClickUp sync — best effort, don't fail submission if ClickUp errors
   const errors = [];
-  await syncClickUp({ state, secrets, clientId }).catch((e) => errors.push({ step: 'clickup', detail: String(e.message || e) }));
-  await syncSheets({ state, clientId }).catch((e) => errors.push({ step: 'sheets', detail: String(e.message || e) }));
+  await syncClickUp({
+    state, clientId, submittedAt,
+    supabaseRowId: row.id,
+  }).catch((e) => {
+    console.error('[campaign-intake] ClickUp sync failed:', e);
+    errors.push({ step: 'clickup', detail: String(e.message || e) });
+  });
+
+  // 4) Sheets webhook — best effort
+  await syncSheets({ state, clientId, submittedAt, supabaseRowId: row.id })
+    .catch((e) => errors.push({ step: 'sheets', detail: String(e.message || e) }));
 
   res.setHeader('Cache-Control', 'no-store');
   return res.status(200).json({ ok: true, id: row.id, syncErrors: errors });
 }
 
-async function syncClickUp({ state, clientId }) {
-  const token = process.env.CLICKUP_API_TOKEN;
-  if (!token) return;
-  const listId = process.env.CLICKUP_CAMPAIGN_FORM_LIST_ID || '901113628488';
 
-  // For v0 we just create a new task in the Campaign Onboarding Form list
-  // with the client_id in the name. Field-by-field custom-field updates land
-  // once the new ClickUp custom fields are created and we have their field IDs.
-  await fetch(`https://api.clickup.com/api/v2/list/${encodeURIComponent(listId)}/task`, {
-    method: 'POST',
+// ─── ClickUp helpers ───────────────────────────────────────────────────
+
+async function clickupFetch(path, opts = {}) {
+  const token = process.env.CLICKUP_API_TOKEN;
+  if (!token) throw new Error('CLICKUP_API_TOKEN not set');
+  const r = await fetch(`https://api.clickup.com/api/v2${path}`, {
+    ...opts,
     headers: {
       Authorization: token,
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      ...(opts.headers || {}),
     },
+  });
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`ClickUp ${r.status} ${path}: ${txt.slice(0, 300)}`);
+  }
+  return r.json();
+}
+
+/**
+ * Find the Active Clients master task whose "Client ID" custom field == clientId.
+ * Returns the task object or null.
+ */
+async function findActiveClientByClientId(clientId) {
+  // Active Clients list has Client ID as a workspace-shared short_text field.
+  // We use the Get Tasks endpoint with the include_closed flag.
+  const result = await clickupFetch(
+    `/list/${ACTIVE_CLIENTS_LIST_ID}/task?include_closed=true&subtasks=true&page=0`
+  );
+  const tasks = result.tasks || [];
+  for (const t of tasks) {
+    const cf = (t.custom_fields || []).find(
+      (f) => f.name === 'Client ID' && String(f.value || '').trim() === clientId,
+    );
+    if (cf) return t;
+  }
+  return null;
+}
+
+async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
+  const displayName = state.displayName || state.candidateName || state.partyName || clientId;
+  const taskName    = `${displayName} (${clientId}) — Campaign Intake`;
+
+  // Find Active Clients master row (for Linked Client + master-row updates)
+  const activeClientTask = await findActiveClientByClientId(clientId).catch(() => null);
+
+  // Build markdown description from state
+  const description = buildDescription(state);
+
+  // Create task in NEW---Campaign Intake Form list
+  const newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
+    method: 'POST',
     body: JSON.stringify({
-      name: `${clientId} — Campaign Intake (v0 submission)`,
-      status: 'complete',
-      description: `Submitted via campaign-intake.vercel.app at ${new Date().toISOString()}.\n\nSee Supabase row for full payload.`,
+      name: taskName,
+      description,
+      status: 'open',
+      tags: [`subject:${state.subjectType}`],
     }),
+  });
+
+  // Set Linked Client relationship (if we found master task)
+  if (activeClientTask && FIELD_IDS['Linked Client']) {
+    await clickupFetch(`/task/${newTask.id}/field/${FIELD_IDS['Linked Client']}`, {
+      method: 'POST',
+      body: JSON.stringify({ value: { add: [activeClientTask.id] } }),
+    }).catch((e) => console.error('[campaign-intake] linked-client set failed:', e));
+  }
+
+  // Update Active Clients master row with: Subject Type, Submitted-At, Supabase Row ID
+  if (activeClientTask) {
+    // Subject Type was created with options ['Candidate','Party'] → orderindex 0|1
+    const subjectOrderIndex = state.subjectType === 'party' ? 1 : 0;
+    const updates = [
+      { fid: ACTIVE_CLIENTS_FIELD_IDS['Subject Type'],                  value: subjectOrderIndex },
+      { fid: ACTIVE_CLIENTS_FIELD_IDS['Campaign Intake Submitted At'],  value: Date.parse(submittedAt) },
+      { fid: ACTIVE_CLIENTS_FIELD_IDS['Form 1 Supabase Row ID'],        value: supabaseRowId },
+    ].filter((u) => u.fid && u.value !== undefined && u.value !== null);
+
+    for (const u of updates) {
+      await setCustomField(activeClientTask.id, u.fid, u.value)
+        .catch((e) => console.error('[campaign-intake] master update failed:', u.fid, e.message));
+    }
+  }
+
+  return { task_id: newTask.id, active_client_id: activeClientTask?.id || null };
+}
+
+async function setCustomField(taskId, fieldId, value) {
+  return clickupFetch(`/task/${taskId}/field/${fieldId}`, {
+    method: 'POST',
+    body: JSON.stringify({ value }),
   });
 }
 
-async function syncSheets({ state, clientId }) {
+
+// ─── Description builder ───────────────────────────────────────────────
+
+function buildDescription(state) {
+  const lines = [
+    `# Campaign Intake — ${state.displayName || state.clientId}`,
+    '',
+    `**Client ID:** ${state.clientId}`,
+    `**Subject type:** ${state.subjectType}`,
+    `**Submitted:** ${new Date().toISOString()}`,
+    '',
+    '_Full structured payload is stored in Supabase. This description shows a human-readable summary._',
+    '',
+  ];
+  // Walk top-level keys and dump
+  const skip = new Set(['clientId', 'subjectType', 'displayName', 'currentStage', 'completedStages', 'submitting', 'submitted', 'submitError', 'optInDomainHostingEmail', 'optInDataUsersOps', 'clickupTaskId']);
+  for (const [k, v] of Object.entries(state)) {
+    if (skip.has(k)) continue;
+    if (v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) continue;
+    lines.push(`## ${humanize(k)}`);
+    lines.push(formatValue(v));
+    lines.push('');
+  }
+  return lines.join('\n').slice(0, 8000); // ClickUp has description size limits
+}
+
+function humanize(key) {
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).trim();
+}
+
+function formatValue(v) {
+  if (Array.isArray(v)) {
+    if (v.length && typeof v[0] === 'object') {
+      return v.map((item, i) => `${i + 1}. ` + Object.entries(item).map(([k, x]) => `**${humanize(k)}:** ${x}`).join(' · ')).join('\n');
+    }
+    return v.map((x) => `- ${x}`).join('\n');
+  }
+  if (v && typeof v === 'object') {
+    return Object.entries(v).map(([k, x]) => `- **${humanize(k)}:** ${x ?? ''}`).join('\n');
+  }
+  return String(v);
+}
+
+
+// ─── Sheets webhook ────────────────────────────────────────────────────
+
+async function syncSheets({ state, clientId, submittedAt, supabaseRowId }) {
   const url = process.env.SHEETS_WEBHOOK_URL;
   if (!url) return;
   await fetch(url, {
@@ -128,7 +256,8 @@ async function syncSheets({ state, clientId }) {
     body: JSON.stringify({
       form: 'campaign_intake',
       client_id: clientId,
-      submitted_at: new Date().toISOString(),
+      submitted_at: submittedAt,
+      supabase_row_id: supabaseRowId,
       payload: state,
     }),
   });

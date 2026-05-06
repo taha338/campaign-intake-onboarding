@@ -679,7 +679,7 @@ export function SectionFiling() {
         optional
         value={secrets.filingPaperworkUploads}
         onChange={(v) => updateSecret({ filingPaperworkUploads: v })}
-        help="Note: uploads are added in v1 — for now, paste links to files in Drive/Dropbox here. Treated as secret."
+        help='Paste Drive/Dropbox links to filing PDFs. IMPORTANT: set sharing to "Anyone with the link — Viewer" before pasting, otherwise we cannot open them. Treated as secret.'
       />
     </Section>
   );
