@@ -189,6 +189,26 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
       await setCustomField(activeClientTask.id, u.fid, u.value)
         .catch((e) => console.error('[campaign-intake] master update failed:', u.fid, e.message));
     }
+
+    // Edit-propagation: if the user changed any contact / display name in the
+    // form, write those back to the Active Clients master so it doesn't drift.
+    // Workspace-shared field IDs are read off the task itself (since they
+    // weren't in our manifest — they auto-attach across all workspace lists).
+    const masterFieldByName = {};
+    for (const cf of activeClientTask.custom_fields || []) masterFieldByName[cf.name] = cf;
+    const contactWrites = [
+      { name: 'DBA / Trade Name*',         value: state.displayName },
+      { name: 'Primary Contact Name*',     value: state.primaryName || state.submitterName },
+      { name: 'Primary Contact Email*',    value: state.primaryEmail || state.submitterEmail },
+      { name: 'Primary Contact Phone*',    value: state.primaryPhone },
+    ].filter((w) => w.value && masterFieldByName[w.name]?.id)
+     .map((w) => ({ fid: masterFieldByName[w.name].id, value: String(w.value).trim() }))
+     .filter((w) => w.value);
+
+    for (const w of contactWrites) {
+      await setCustomField(activeClientTask.id, w.fid, w.value)
+        .catch((e) => console.error('[campaign-intake] contact propagation failed:', w.fid, e.message));
+    }
   }
 
   return { task_id: newTask.id, active_client_id: activeClientTask?.id || null };
@@ -250,6 +270,9 @@ function formatValue(v) {
 async function syncSheets({ state, clientId, submittedAt, supabaseRowId }) {
   const url = process.env.SHEETS_WEBHOOK_URL;
   if (!url) return;
+  // Strip clientId from payload — already promoted to top-level client_id,
+  // having it twice creates a redundant column in the Sheet.
+  const { clientId: _drop, ...payload } = state || {};
   await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -258,7 +281,7 @@ async function syncSheets({ state, clientId, submittedAt, supabaseRowId }) {
       client_id: clientId,
       submitted_at: submittedAt,
       supabase_row_id: supabaseRowId,
-      payload: state,
+      payload,
     }),
   });
 }
