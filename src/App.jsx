@@ -329,16 +329,39 @@ function PrefillBoot() {
     fetchPrefill(cid)
       .then((data) => {
         if (!data?.found) return;
+        const brand = data.brand || {};
         dispatch({
           type: 'PREFILL',
           payload: {
             clickupTaskId: data.taskId || '',
-            submitterName: data.contact?.name || '',
+            // Active Clients master fields
+            submitterName:  data.contact?.name || '',
             submitterEmail: data.contact?.email || '',
-            primaryName: data.contact?.name || '',
-            primaryEmail: data.contact?.email || '',
-            primaryPhone: data.contact?.phone || '',
-            displayName: data.tradeName || '',
+            primaryName:    data.contact?.name || '',
+            primaryEmail:   data.contact?.email || '',
+            primaryPhone:   data.contact?.phone || '',
+            secondaryName:  data.contact?.secondaryName || '',
+            secondaryEmail: data.contact?.secondaryEmail || '',
+            secondaryRole:  data.contact?.secondaryRole || '',
+            displayName:    data.tradeName || '',
+            subjectType:    data.subjectType || '',
+            communicationPreference: data.meta?.communicationPreference || '',
+            packageSelected:         data.meta?.packageSelected || '',
+            industry:                data.meta?.industry || '',
+            // Cross-form pre-fill from Form 2 (brand_submissions)
+            ...(brand.candidate_name     ? { candidateName:    brand.candidate_name } : {}),
+            ...(brand.candidate_office   ? { candidateOffice:  brand.candidate_office } : {}),
+            ...(brand.candidate_state    ? { candidateState:   brand.candidate_state } : {}),
+            ...(brand.candidate_district ? { candidateDistrict: brand.candidate_district } : {}),
+            ...(brand.election_year      ? { electionYear:     brand.election_year } : {}),
+            ...(brand.party_affiliation  ? { partyAffiliation: brand.party_affiliation } : {}),
+            ...(brand.race_focus         ? { raceFocus:        brand.race_focus } : {}),
+            ...(brand.party_name         ? { partyName:        brand.party_name } : {}),
+            ...(brand.party_acronym      ? { partyAcronym:     brand.party_acronym } : {}),
+            ...(brand.party_type         ? { partyType:        brand.party_type } : {}),
+            ...(brand.party_scope        ? { partyScope:       brand.party_scope } : {}),
+            ...(brand.party_state        ? { partyState:       brand.party_state } : {}),
+            ...(brand.party_founded_year ? { partyFoundedYear: brand.party_founded_year } : {}),
           },
         });
       })

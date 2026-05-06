@@ -1,28 +1,38 @@
 /**
  * GET /api/clickup-prefill?clientId=<id>
  *
- * Server-side proxy to ClickUp. Fetches the master Active Clients task
- * matching `Client ID = <id>` and returns a sanitized prefill payload
- * the form can use to auto-populate Section A and B.
+ * Returns pre-fill data for the form, sourced from:
+ *   1. Active Clients master row (client metadata)
+ *   2. Sibling-form Supabase rows linked via Active Clients (cross-form fill)
  *
- * Required env vars (set in Vercel project settings):
- *   - CLICKUP_API_TOKEN        — ClickUp personal API token (server-side only)
- *   - CLICKUP_ACTIVE_CLIENTS_LIST_ID  — defaults to 901113554047 if not set
- *
- * Optional env var overrides for custom field names (defaults shown):
- *   - CLICKUP_FIELD_CLIENT_ID         "Client ID"
- *   - CLICKUP_FIELD_TRADE_NAME        "DBA / Trade Name*"
- *   - CLICKUP_FIELD_PRIMARY_NAME      "Primary Contact Name*"
- *   - CLICKUP_FIELD_PRIMARY_EMAIL     "Primary Contact Email*"
- *   - CLICKUP_FIELD_PRIMARY_PHONE     "Primary Contact Phone*"
+ * Required env vars (Vercel project settings):
+ *   - CLICKUP_API_TOKEN
+ *   - SUPABASE_URL
+ *   - SUPABASE_SECRET_KEY
+ * Optional:
+ *   - CLICKUP_ACTIVE_CLIENTS_LIST_ID  (default 901113554047)
  */
 
+import { createClient } from '@supabase/supabase-js';
+
 const FIELDS = {
-  clientId:    process.env.CLICKUP_FIELD_CLIENT_ID    || 'Client ID',
-  tradeName:   process.env.CLICKUP_FIELD_TRADE_NAME   || 'DBA / Trade Name*',
-  primaryName: process.env.CLICKUP_FIELD_PRIMARY_NAME || 'Primary Contact Name*',
-  primaryEmail:process.env.CLICKUP_FIELD_PRIMARY_EMAIL|| 'Primary Contact Email*',
-  primaryPhone:process.env.CLICKUP_FIELD_PRIMARY_PHONE|| 'Primary Contact Phone*',
+  // Workspace-shared fields (auto-attached on every list)
+  clientId:       'Client ID',
+  tradeName:      'DBA / Trade Name*',
+  primaryName:    'Primary Contact Name*',
+  primaryEmail:   'Primary Contact Email*',
+  primaryPhone:   'Primary Contact Phone*',
+  secondaryName:  'Secondary Contact Name',
+  secondaryEmail: 'Secondary Contact Email',
+  secondaryRole:  'Secondary Contact Role',
+  commPref:       'Communication Preference*',
+  packageSel:     'Package Selected**',
+  industry:       'Industry / Niche',
+  // Our newly-created Active Clients fields
+  subjectType:    'Subject Type',
+  form1RowId:     'Form 1 Supabase Row ID',
+  form2RowId:     'Form 2 Supabase Row ID',
+  form3RowId:     'Form 3 Supabase Row ID',
 };
 
 function findFieldValue(customFields, label) {
@@ -56,11 +66,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'CLICKUP_API_TOKEN not configured on the server' });
   }
 
-  // ClickUp doesn't support filtering by custom field value via REST in a clean
-  // way without iterating, so we fetch the list and find the matching task.
-  // For 12 tasks this is fine; if the list grows beyond a few hundred we should
-  // switch to the Search API or maintain a separate "active clients" table.
   try {
+    // ── 1. Find the Active Clients master task ──
     const url = `https://api.clickup.com/api/v2/list/${encodeURIComponent(listId)}/task?include_closed=true&subtasks=false`;
     const upstream = await fetch(url, {
       method: 'GET',
@@ -81,20 +88,59 @@ export default async function handler(req, res) {
     if (!match) {
       return res.status(200).json({ found: false });
     }
+
     const cfs = match.custom_fields || [];
+    const subjectType    = findFieldValue(cfs, FIELDS.subjectType);
+    const form2RowId     = findFieldValue(cfs, FIELDS.form2RowId);
+
     const payload = {
       found: true,
-      taskId: match.id,
-      taskName: match.name,
-      taskUrl: match.url,
-      clientId: findFieldValue(cfs, FIELDS.clientId),
+      taskId:    match.id,
+      taskName:  match.name,
+      taskUrl:   match.url,
+      clientId:  findFieldValue(cfs, FIELDS.clientId),
       tradeName: findFieldValue(cfs, FIELDS.tradeName),
+      // Subject type (Candidate / Party) — drives all conditional logic
+      subjectType: typeof subjectType === 'string' ? subjectType.toLowerCase() : null,
+      // Communications metadata
       contact: {
-        name:  findFieldValue(cfs, FIELDS.primaryName),
-        email: findFieldValue(cfs, FIELDS.primaryEmail),
-        phone: findFieldValue(cfs, FIELDS.primaryPhone),
+        name:           findFieldValue(cfs, FIELDS.primaryName),
+        email:          findFieldValue(cfs, FIELDS.primaryEmail),
+        phone:          findFieldValue(cfs, FIELDS.primaryPhone),
+        secondaryName:  findFieldValue(cfs, FIELDS.secondaryName),
+        secondaryEmail: findFieldValue(cfs, FIELDS.secondaryEmail),
+        secondaryRole:  findFieldValue(cfs, FIELDS.secondaryRole),
       },
+      // Client metadata
+      meta: {
+        communicationPreference: findFieldValue(cfs, FIELDS.commPref),
+        packageSelected:         findFieldValue(cfs, FIELDS.packageSel),
+        industry:                findFieldValue(cfs, FIELDS.industry),
+      },
+      // Sibling-form completion state — useful for showing "Form 2 already done" hints
+      siblingForms: {
+        form2RowId,
+        form3RowId: findFieldValue(cfs, FIELDS.form3RowId),
+      },
+      // Will be hydrated below if sibling form data is available
+      brand: null,
     };
+
+    // ── 2. Cross-form Supabase lookup — pull Form 2 brand fields if available ──
+    if (form2RowId) {
+      const supabaseUrl = process.env.SUPABASE_URL;
+      const secretKey   = process.env.SUPABASE_SECRET_KEY;
+      if (supabaseUrl && secretKey) {
+        const supabase = createClient(supabaseUrl, secretKey, { auth: { persistSession: false } });
+        const { data: brandRow } = await supabase
+          .from('brand_submissions')
+          .select('subject_type, candidate_name, candidate_office, candidate_state, candidate_district, election_year, party_affiliation, race_focus, candidate_type, party_name, party_acronym, party_type, party_scope, party_state, party_founded_year, brand_core, sub_direction, logo_type, existing_logo_url, color_primary, color_secondary, color_accent, color_background, color_text, color_highlight, font_heading, font_body, backgrounds, policy_priorities')
+          .eq('id', form2RowId)
+          .maybeSingle();
+        if (brandRow) payload.brand = brandRow;
+      }
+    }
+
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json(payload);
   } catch (err) {
