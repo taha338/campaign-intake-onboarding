@@ -201,6 +201,7 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
       { name: 'Primary Contact Name*',     value: state.primaryName || state.submitterName },
       { name: 'Primary Contact Email*',    value: state.primaryEmail || state.submitterEmail },
       { name: 'Primary Contact Phone*',    value: state.primaryPhone },
+      { name: 'EIN / Tax ID',              value: state.ein },
     ].filter((w) => w.value && masterFieldByName[w.name]?.id)
      .map((w) => ({ fid: masterFieldByName[w.name].id, value: String(w.value).trim() }))
      .filter((w) => w.value);
