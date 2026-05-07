@@ -68,6 +68,17 @@ body {
   border-color: var(--color-op-red);
   box-shadow: 0 0 0 3px rgba(166, 30, 34, 0.12);
 }
+.op-input-invalid,
+.op-input.op-input-invalid {
+  border-color: var(--color-op-red);
+  box-shadow: 0 0 0 2px rgba(166, 30, 34, 0.18);
+}
+.op-required-group-invalid {
+  border: 1px solid var(--color-op-red);
+  box-shadow: 0 0 0 2px rgba(166, 30, 34, 0.18);
+  border-radius: 10px;
+  padding: 0.5rem;
+}
 
 .op-label {
   display: block;

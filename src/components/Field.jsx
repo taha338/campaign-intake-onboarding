@@ -30,12 +30,13 @@ export function Help({ children }) {
 export function TextField({ label, value, onChange, placeholder, help, optional, required, secret, type = 'text', autoComplete = 'off' }) {
   const [reveal, setReveal] = useState(!secret);
   const inputType = secret && !reveal ? 'password' : type;
+  const invalid = required && !String(value || '').trim();
   return (
     <div>
       <Label optional={optional} secret={secret} required={required}>{label}</Label>
       <div className="relative">
         <input
-          className="op-input"
+          className={`op-input${invalid ? ' op-input-invalid' : ''}`}
           type={inputType}
           value={value || ''}
           onChange={(e) => onChange(e.target.value)}
@@ -61,11 +62,12 @@ export function TextField({ label, value, onChange, placeholder, help, optional,
 }
 
 export function TextArea({ label, value, onChange, placeholder, help, optional, required, secret, rows = 4 }) {
+  const invalid = required && !String(value || '').trim();
   return (
     <div>
       <Label optional={optional} secret={secret} required={required}>{label}</Label>
       <textarea
-        className="op-input resize-y"
+        className={`op-input resize-y${invalid ? ' op-input-invalid' : ''}`}
         rows={rows}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
@@ -80,11 +82,12 @@ export function TextArea({ label, value, onChange, placeholder, help, optional, 
 export function Select({ label, value, onChange, options, help, optional, required, placeholder = 'Select…' }) {
   // options: array of strings or {id, label}
   const norm = options.map((o) => typeof o === 'string' ? { id: o, label: o } : o);
+  const invalid = required && !value;
   return (
     <div>
       <Label optional={optional} required={required}>{label}</Label>
       <select
-        className="op-input bg-white"
+        className={`op-input bg-white${invalid ? ' op-input-invalid' : ''}`}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -98,10 +101,11 @@ export function Select({ label, value, onChange, options, help, optional, requir
 
 export function RadioGroup({ label, value, onChange, options, help, optional, required }) {
   const norm = options.map((o) => typeof o === 'string' ? { id: o, label: o } : o);
+  const invalid = required && !value;
   return (
     <div>
       <Label optional={optional} required={required}>{label}</Label>
-      <div className="flex flex-wrap gap-2">
+      <div className={`flex flex-wrap gap-2${invalid ? ' op-required-group-invalid' : ''}`}>
         {norm.map((o) => {
           const selected = value === o.id;
           return (
@@ -125,17 +129,18 @@ export function RadioGroup({ label, value, onChange, options, help, optional, re
   );
 }
 
-export function MultiSelectChips({ label, values, onChange, options, help, optional }) {
+export function MultiSelectChips({ label, values, onChange, options, help, optional, required }) {
   const norm = options.map((o) => typeof o === 'string' ? { id: o, label: o } : o);
   const toggle = (id) => {
     const set = new Set(values || []);
     if (set.has(id)) set.delete(id); else set.add(id);
     onChange(Array.from(set));
   };
+  const invalid = required && (!values || values.length === 0);
   return (
     <div>
-      <Label optional={optional}>{label}</Label>
-      <div className="flex flex-wrap gap-2">
+      <Label optional={optional} required={required}>{label}</Label>
+      <div className={`flex flex-wrap gap-2${invalid ? ' op-required-group-invalid' : ''}`}>
         {norm.map((o) => {
           const on = (values || []).includes(o.id);
           return (
