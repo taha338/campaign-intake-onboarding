@@ -28,6 +28,7 @@ import {
   ACTIVE_CLIENTS_FIELD_IDS,
   FIELD_IDS,
 } from './clickup-field-map.js';
+import { buildCustomFields, getDropdownOptionsMap } from './clickup-build.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -89,7 +90,7 @@ export default async function handler(req, res) {
   // 3) ClickUp sync — best effort, don't fail submission if ClickUp errors
   const errors = [];
   await syncClickUp({
-    state, clientId, submittedAt,
+    state, secrets, clientId, submittedAt,
     supabaseRowId: row.id,
   }).catch((e) => {
     console.error('[campaign-intake] ClickUp sync failed:', e);
@@ -146,17 +147,27 @@ async function findActiveClientByClientId(clientId) {
   return null;
 }
 
-async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
+async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowId }) {
   const displayName = state.displayName || state.candidateName || state.partyName || clientId;
   const taskName    = `${displayName} (${clientId}) — Campaign Intake`;
 
   // Find Active Clients master row (for Linked Client + master-row updates)
   const activeClientTask = await findActiveClientByClientId(clientId).catch(() => null);
 
-  // Build markdown description from state
+  // Build markdown description (still useful for at-a-glance reading)
   const description = buildDescription(state);
 
-  // Create task in NEW---Campaign Intake Form list
+  // Resolve dropdown options once, then build structured custom_fields[]
+  const optionsMap = await getDropdownOptionsMap().catch((e) => {
+    console.warn('[campaign-intake] dropdown options fetch failed:', e.message);
+    return {};
+  });
+  const { fields: customFields, unresolved } = buildCustomFields(state, secrets, optionsMap);
+  if (unresolved.length) {
+    console.warn('[campaign-intake] unresolved dropdown values:', unresolved);
+  }
+
+  // Create task in NEW---Campaign Intake Form list with all fields populated
   const newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
     method: 'POST',
     body: JSON.stringify({
@@ -164,6 +175,7 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
       description,
       status: 'to do',
       tags: [`subject:${state.subjectType}`],
+      custom_fields: customFields,
     }),
   });
 
@@ -210,9 +222,32 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
       await setCustomField(activeClientTask.id, w.fid, w.value)
         .catch((e) => console.error('[campaign-intake] contact propagation failed:', w.fid, e.message));
     }
+
+    // If all 3 form Submitted-At dates are now non-null on the master,
+    // advance status to "all forms received" so the Worker doesn't have
+    // to run a separate automation. We just wrote Campaign Intake's date,
+    // so check the other two from the pre-write task snapshot.
+    await maybeAdvanceAllFormsReceived(activeClientTask, {
+      campaign_intake: true,
+    }).catch((e) => console.error('[campaign-intake] status advance failed:', e.message));
   }
 
   return { task_id: newTask.id, active_client_id: activeClientTask?.id || null };
+}
+
+async function maybeAdvanceAllFormsReceived(activeClientTask, justWrote) {
+  const get = (name) => (activeClientTask.custom_fields || []).find((f) => f.name === name)?.value;
+  const f1 = justWrote.campaign_intake || get('Campaign Intake Submitted At');
+  const f2 = justWrote.brand_onboarding || get('Brand Onboarding Submitted At');
+  const f3 = justWrote.website_content || get('Website Content Submitted At');
+  if (!(f1 && f2 && f3)) return;
+  const target = process.env.AC_ALL_FORMS_STATUS || 'all forms received';
+  const current = activeClientTask.status?.status || '';
+  if (current.toLowerCase() === target.toLowerCase()) return;
+  await clickupFetch(`/task/${activeClientTask.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status: target }),
+  });
 }
 
 async function setCustomField(taskId, fieldId, value) {
