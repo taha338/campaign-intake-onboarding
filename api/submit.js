@@ -154,8 +154,10 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
   // Find Active Clients master row (for Linked Client + master-row updates)
   const activeClientTask = await findActiveClientByClientId(clientId).catch(() => null);
 
-  // Build markdown description (still useful for at-a-glance reading)
-  const description = buildDescription(state);
+  // No description dump — all data lives in structured custom fields now.
+  // The legacy markdown body was duplicating every form answer into the
+  // task description and obscuring the actual structured data.
+  const description = '';
 
   // Resolve dropdown options once, then build structured custom_fields[]
   const optionsMap = await getDropdownOptionsMap().catch((e) => {
@@ -250,6 +252,16 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
       campaign_intake: true,
     }).catch((e) => console.error('[campaign-intake] status advance failed:', e.message));
   }
+
+  // Flip the form-list task's own status to 'submitted' so ClickUp emits a
+  // taskStatusUpdated webhook → Worker F0 (flip AC subtask to 'forms
+  // completed') + W4 (spawn Configuration task). Created at 'to do' above
+  // for the same reason — only a real status_change event triggers the
+  // Worker's status_change automations.
+  await clickupFetch(`/task/${newTask.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status: 'submitted' }),
+  }).catch((e) => console.error('[campaign-intake] status flip to submitted failed:', e.message));
 
   return { task_id: newTask.id, active_client_id: activeClientTask?.id || null };
 }
