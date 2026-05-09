@@ -394,20 +394,20 @@ function PrefillBoot() {
             communicationPreference: data.meta?.communicationPreference || '',
             packageSelected:         data.meta?.packageSelected || '',
             industry:                data.meta?.industry || '',
-            // Cross-form pre-fill from Form 2 (brand_submissions)
-            ...(brand.candidate_name     ? { candidateName:    brand.candidate_name } : {}),
-            ...(brand.candidate_office   ? { candidateOffice:  brand.candidate_office } : {}),
-            ...(brand.candidate_state    ? { candidateState:   brand.candidate_state } : {}),
-            ...(brand.candidate_district ? { candidateDistrict: brand.candidate_district } : {}),
-            ...(brand.election_year      ? { electionYear:     brand.election_year } : {}),
-            ...(brand.party_affiliation  ? { partyAffiliation: brand.party_affiliation } : {}),
-            ...(brand.race_focus         ? { raceFocus:        brand.race_focus } : {}),
-            ...(brand.party_name         ? { partyName:        brand.party_name } : {}),
-            ...(brand.party_acronym      ? { partyAcronym:     brand.party_acronym } : {}),
-            ...(brand.party_type         ? { partyType:        brand.party_type } : {}),
-            ...(brand.party_scope        ? { partyScope:       brand.party_scope } : {}),
-            ...(brand.party_state        ? { partyState:       brand.party_state } : {}),
-            ...(brand.party_founded_year ? { partyFoundedYear: brand.party_founded_year } : {}),
+            // Cross-form pre-fill from Form 2 (brand_submissions). Keys must
+            // match IntakeContext schema or the values land in dead slots and
+            // form inputs stay empty.
+            ...(brand.candidate_name     ? { candidateFullLegalName: brand.candidate_name } : {}),
+            ...(brand.candidate_office   ? { officeSought:           brand.candidate_office } : {}),
+            ...(brand.candidate_state    ? { candState:              brand.candidate_state } : {}),
+            ...(brand.candidate_district ? { district:               brand.candidate_district } : {}),
+            ...(brand.election_year      ? { electionYear:           brand.election_year } : {}),
+            ...(brand.party_name         ? { partyName:              brand.party_name } : {}),
+            ...(brand.party_acronym      ? { partyAcronym:           brand.party_acronym } : {}),
+            ...(brand.party_type         ? { partyType:              brand.party_type } : {}),
+            ...(brand.party_scope        ? { partyScope:             brand.party_scope } : {}),
+            ...(brand.party_state        ? { primaryStateParty:      brand.party_state } : {}),
+            ...(brand.party_founded_year ? { foundedYear:            brand.party_founded_year } : {}),
           },
         });
       })
