@@ -167,7 +167,10 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
     console.warn('[campaign-intake] unresolved dropdown values:', unresolved);
   }
 
-  // Create task in NEW---Campaign Intake Form list with all fields populated
+  // Step 1: create the task WITHOUT inline custom_fields. ClickUp's inline
+  // custom_fields array silently drops fields beyond ~25-28 entries
+  // (early-array fields are the ones that get lost). Per-field POST loop
+  // below avoids that — see docs/clickup-custom-fields.md §6.
   const newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
     method: 'POST',
     body: JSON.stringify({
@@ -175,9 +178,25 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
       description,
       status: 'to do',
       tags: [`subject:${state.subjectType}`],
-      custom_fields: customFields,
     }),
   });
+
+  // Step 2: write each custom field individually. Failures are logged but
+  // never thrown — one bad value (e.g. a NANP-rejected phone) shouldn't
+  // lose the rest of the submission.
+  const fieldFailures = [];
+  for (const cf of customFields) {
+    try {
+      await clickupFetch(`/task/${newTask.id}/field/${cf.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ value: cf.value }),
+      });
+    } catch (e) {
+      const detail = { fieldId: cf.id, error: String(e.message || e) };
+      console.warn('[campaign-intake] field write failed:', detail);
+      fieldFailures.push(detail);
+    }
+  }
 
   // Set Linked Client relationship (if we found master task)
   if (activeClientTask && FIELD_IDS['Linked Client']) {
