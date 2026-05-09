@@ -17,6 +17,7 @@ import ProgressBar from './components/ProgressBar';
 import StageShell from './components/StageShell';
 import SubjectTypeToggle from './components/SubjectTypeToggle';
 import OptInGate from './components/OptInGate';
+import AutofillButton from './components/AutofillButton';
 import { TextField, TextArea, Select, RadioGroup, MultiSelectChips, TwoCol } from './components/Field';
 import {
   SectionWeb, SectionKeyPeople, SectionContacts, SectionDomainDns, SectionEmailInfra,
@@ -443,6 +444,7 @@ export default function App() {
       <div className="op-paper min-h-screen pb-20">
         <HeaderWithClient />
         <PrefillBoot />
+        <AutofillButton />
         <Wizard />
       </div>
     </IntakeProvider>
