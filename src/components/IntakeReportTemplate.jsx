@@ -95,7 +95,7 @@ function Field({ label, value }) {
   const display = formatValue(value);
   if (!display) return null;
   return (
-    <div style={{ breakInside: 'avoid' }}>
+    <div data-pdf-field="" style={{ breakInside: 'avoid' }}>
       <p style={{
         fontSize: 10, fontWeight: 700, letterSpacing: '0.18em',
         textTransform: 'uppercase', color: MUTED, margin: '0 0 6px',
@@ -137,7 +137,7 @@ function Section({ number, label, title, children, hide }) {
   });
   if (!anyFilled) return null;
   return (
-    <div style={{ marginBottom: 38 }}>
+    <div data-pdf-section="" style={{ marginBottom: 38 }}>
       <SectionTitle number={number} label={label}>{title}</SectionTitle>
       <FieldGrid>{items}</FieldGrid>
     </div>
@@ -209,7 +209,7 @@ export default function IntakeReportTemplate({ state, secrets }) {
       </div>
 
       {/* HERO CARD */}
-      <div style={{
+      <div data-pdf-section="" style={{
         background: NAVY,
         color: '#FFFFFF',
         borderRadius: 22,
@@ -416,7 +416,7 @@ export default function IntakeReportTemplate({ state, secrets }) {
       </Section>
 
       {/* FOOTER */}
-      <div style={{
+      <div data-pdf-section="" style={{
         marginTop: 48, paddingTop: 24, borderTop: `1px solid ${BORDER}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         fontFamily: BODY_FONT,
