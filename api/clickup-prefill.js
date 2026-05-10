@@ -15,6 +15,17 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+const ACTIVE_DEALS_LIST_ID = '901113549967';
+
+// Sales-intake (Active Deals) custom field IDs we want to mirror into Form 1.
+// Source of truth: sales-intake/api/_clickup.js
+const SALES_FIELD_IDS = {
+  ein:                    '0cfbb078-acf5-4da8-8c84-9001d214e27b', // EIN / Tax ID
+  candidateFullLegalName: 'a60f8e1b-fb8e-4831-8072-06b86ccb8a45', // Candidate Legal Name
+  referralSource:         '0344dc31-ce25-40e8-913d-0d650dd64cde', // Referral Source
+};
+const SALES_CLIENT_ID_FIELD_ID = 'fb5566ed-7a97-4337-a698-84b07d581fb8';
+
 const FIELDS = {
   // Workspace-shared fields (auto-attached on every list)
   clientId:       'Client ID',
@@ -124,9 +135,50 @@ export default async function handler(req, res) {
       },
       // Will be hydrated below if sibling form data is available
       brand: null,
+      // Hydrated from the matching Active Deals (sales intake) task
+      sales: null,
     };
 
-    // ── 2. Cross-form Supabase lookup — pull Form 2 brand fields if available ──
+    // ── 2a. Cross-form ClickUp lookup — pull EIN + sales fields from Active Deals ──
+    try {
+      const dealsUrl = `https://api.clickup.com/api/v2/list/${ACTIVE_DEALS_LIST_ID}/task?include_closed=true&subtasks=false`;
+      const dealsRes = await fetch(dealsUrl, {
+        method: 'GET',
+        headers: { Authorization: token, Accept: 'application/json' },
+      });
+      if (dealsRes.ok) {
+        const dealsData = await dealsRes.json();
+        const deal = (dealsData.tasks || []).find((t) =>
+          (t.custom_fields || []).some(
+            (cf) => cf.id === SALES_CLIENT_ID_FIELD_ID
+              && String(cf.value || '').toLowerCase() === clientId.toLowerCase()
+          )
+        );
+        if (deal) {
+          const byId = {};
+          for (const cf of deal.custom_fields || []) byId[cf.id] = cf;
+          const readText = (fid) => {
+            const cf = byId[fid];
+            if (!cf) return null;
+            if (cf.type === 'drop_down' && cf.value !== undefined && cf.value !== null) {
+              return cf.type_config?.options?.[cf.value]?.name ?? null;
+            }
+            return cf.value ?? null;
+          };
+          payload.sales = {
+            ein:                    readText(SALES_FIELD_IDS.ein),
+            candidateFullLegalName: readText(SALES_FIELD_IDS.candidateFullLegalName),
+            referralSource:         readText(SALES_FIELD_IDS.referralSource),
+            dealTaskId:             deal.id,
+          };
+        }
+      }
+    } catch (e) {
+      // best-effort — leave payload.sales as null
+      console.warn('[clickup-prefill] sales lookup failed:', e?.message || e);
+    }
+
+    // ── 2b. Cross-form Supabase lookup — pull Form 2 brand fields if available ──
     if (form2RowId) {
       const supabaseUrl = process.env.SUPABASE_URL;
       const secretKey   = process.env.SUPABASE_SECRET_KEY;
