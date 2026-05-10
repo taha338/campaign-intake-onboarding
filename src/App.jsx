@@ -376,6 +376,7 @@ function PrefillBoot() {
       .then((data) => {
         if (!data?.found) return;
         const brand = data.brand || {};
+        const sales = data.sales || {};
         dispatch({
           type: 'PREFILL',
           payload: {
@@ -408,6 +409,10 @@ function PrefillBoot() {
             ...(brand.party_scope        ? { partyScope:       brand.party_scope } : {}),
             ...(brand.party_state        ? { partyState:       brand.party_state } : {}),
             ...(brand.party_founded_year ? { partyFoundedYear: brand.party_founded_year } : {}),
+            // Cross-form pre-fill from sales intake (Active Deals)
+            ...(sales.ein                    ? { ein:                    sales.ein } : {}),
+            ...(sales.candidateFullLegalName ? { candidateFullLegalName: sales.candidateFullLegalName } : {}),
+            ...(sales.referralSource         ? { referralSource:         sales.referralSource } : {}),
           },
         });
       })

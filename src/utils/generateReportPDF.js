@@ -2,9 +2,9 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 
 /**
- * Capture a static report DOM node and slice it across A4 pages.
- * Mirrors the political-brand-discovery PDF pipeline so the campaign
- * intake summary renders with the same Op1776 visual identity.
+ * Capture a static report DOM node and render it as a single-page PDF whose
+ * page size matches the captured content height. No A4 pagination, so cards
+ * and sections are never sliced across page breaks.
  */
 export async function generateReportPDF(node, fileName = 'report.pdf') {
   if (!node) throw new Error('generateReportPDF: node is required');
@@ -82,71 +82,14 @@ export async function generateReportPDF(node, fileName = 'report.pdf') {
     onclone: (_doc, clonedNode) => freezeColors(clonedNode, node),
   });
 
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const imgWidth = pageWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-  if (imgHeight <= pageHeight) {
-    pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, imgWidth, imgHeight);
-  } else {
-    const pxPerPage = Math.floor((pageHeight * canvas.width) / pageWidth);
-
-    const findCleanBreak = (sourceCanvas, startY, maxY) => {
-      const lookback = Math.min(Math.floor(pxPerPage * 0.18), maxY - startY - 1);
-      if (lookback <= 0) return maxY;
-      try {
-        const ctx = sourceCanvas.getContext('2d');
-        const region = ctx.getImageData(0, maxY - lookback, sourceCanvas.width, lookback);
-        const w = sourceCanvas.width;
-        const data = region.data;
-        for (let row = lookback - 1; row >= 0; row -= 1) {
-          let nonWhite = 0;
-          const base = row * w * 4;
-          for (let x = 0; x < w; x += 4) {
-            const i = base + x * 4;
-            if (data[i] < 248 || data[i + 1] < 248 || data[i + 2] < 248) {
-              nonWhite += 1;
-              if (nonWhite > 2) break;
-            }
-          }
-          if (nonWhite <= 2) return maxY - lookback + row;
-        }
-      } catch { /* tainted canvas — fall through */ }
-      return maxY;
-    };
-
-    let yOffset = 0;
-    let pageIndex = 0;
-
-    while (yOffset < canvas.height) {
-      const remaining = canvas.height - yOffset;
-      let sliceHeight;
-      if (remaining <= pxPerPage) {
-        sliceHeight = remaining;
-      } else {
-        const breakY = findCleanBreak(canvas, yOffset, yOffset + pxPerPage);
-        sliceHeight = Math.max(breakY - yOffset, Math.floor(pxPerPage * 0.5));
-      }
-
-      const slice = document.createElement('canvas');
-      slice.width = canvas.width;
-      slice.height = sliceHeight;
-      const ctx = slice.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, slice.width, slice.height);
-      ctx.drawImage(canvas, 0, yOffset, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
-
-      const sliceImgHeight = (sliceHeight * imgWidth) / canvas.width;
-      if (pageIndex > 0) pdf.addPage();
-      pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, imgWidth, sliceImgHeight);
-
-      yOffset += sliceHeight;
-      pageIndex += 1;
-    }
-  }
-
+  const pageWidth = 595.28; // A4 width in pt — keeps the report at a familiar reading width
+  const pageHeight = (canvas.height * pageWidth) / canvas.width;
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'pt',
+    format: [pageWidth, pageHeight],
+  });
+  pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageWidth, pageHeight);
   pdf.save(fileName);
   return pdf;
 }

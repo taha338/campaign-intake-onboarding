@@ -28,6 +28,7 @@ import {
   ACTIVE_CLIENTS_FIELD_IDS,
   FIELD_IDS,
 } from './clickup-field-map.js';
+import { buildCustomFields, getDropdownOptionsMap } from './clickup-build.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -88,11 +89,14 @@ export default async function handler(req, res) {
 
   // 3) ClickUp sync — best effort, don't fail submission if ClickUp errors
   const errors = [];
+  console.log('[campaign-intake] syncClickUp start clientId=', clientId, 'subjectType=', state.subjectType, 'stateKeys=', Object.keys(state || {}));
   await syncClickUp({
     state, clientId, submittedAt,
     supabaseRowId: row.id,
+  }).then((r) => {
+    console.log('[campaign-intake] syncClickUp ok', r);
   }).catch((e) => {
-    console.error('[campaign-intake] ClickUp sync failed:', e);
+    console.error('[campaign-intake] ClickUp sync failed:', e && e.stack || e);
     errors.push({ step: 'clickup', detail: String(e.message || e) });
   });
 
@@ -121,6 +125,9 @@ async function clickupFetch(path, opts = {}) {
   });
   if (!r.ok) {
     const txt = await r.text();
+    // Log the outgoing body so we can see exactly what ClickUp rejected.
+    const sentBody = typeof opts.body === 'string' ? opts.body.slice(0, 2000) : '<no body>';
+    console.error('[campaign-intake] ClickUp non-OK', r.status, path, 'sentBody:', sentBody);
     throw new Error(`ClickUp ${r.status} ${path}: ${txt.slice(0, 300)}`);
   }
   return r.json();
@@ -153,19 +160,46 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
   // Find Active Clients master row (for Linked Client + master-row updates)
   const activeClientTask = await findActiveClientByClientId(clientId).catch(() => null);
 
-  // Build markdown description from state
-  const description = buildDescription(state);
+  // No description dump — all data lives in custom fields now.
+  const description = '';
 
-  // Create task in NEW---Campaign Intake Form list
+  // Resolve dropdowns/labels → option UUIDs/orderindex (best-effort)
+  const optionsMap = await getDropdownOptionsMap().catch((e) => {
+    console.warn('[campaign-intake] dropdown options fetch failed:', e.message);
+    return {};
+  });
+  const { fields: customFields, unresolved } = buildCustomFields(state, optionsMap);
+  if (unresolved.length) {
+    console.warn('[campaign-intake] unresolved field values:', unresolved);
+  }
+
+  // Step 1: create task at 'to do' WITHOUT inline custom_fields (docs/clickup-custom-fields.md §6).
+  // We later PUT status to 'submitted' so ClickUp emits a real taskStatusUpdated
+  // webhook — that's the only event Worker status_change triggers (F0, W4) accept.
+  const createBody = JSON.stringify({
+    name: taskName,
+    description,
+    status: 'to do',
+    tags: [`subject:${state.subjectType}`],
+  });
+  console.log('[campaign-intake] creating task in list', PRIMARY_LIST_ID, 'bodyLen=', createBody.length, 'taskName=', taskName);
   const newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
     method: 'POST',
-    body: JSON.stringify({
-      name: taskName,
-      description,
-      status: 'to do',
-      tags: [`subject:${state.subjectType}`],
-    }),
+    body: createBody,
   });
+  console.log('[campaign-intake] created task', newTask.id, 'will write', customFields.length, 'custom fields');
+
+  // Step 2: per-field POST. Failures isolated, never thrown.
+  const fieldFailures = [];
+  for (const cf of customFields) {
+    try {
+      await setCustomField(newTask.id, cf.id, cf.value);
+    } catch (e) {
+      const detail = { fieldId: cf.id, error: String(e.message || e) };
+      console.warn('[campaign-intake] field write failed:', detail);
+      fieldFailures.push(detail);
+    }
+  }
 
   // Set Linked Client relationship (if we found master task)
   if (activeClientTask && FIELD_IDS['Linked Client']) {
@@ -174,6 +208,20 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
       body: JSON.stringify({ value: { add: [activeClientTask.id] } }),
     }).catch((e) => console.error('[campaign-intake] linked-client set failed:', e));
   }
+
+  // Propagate workspace-shared fields from AC master onto the new form-list
+  // task: Client ID + every populated workspace-shared field on the AC task.
+  // Workspace-shared field UUIDs are identical on every list, so writing
+  // them by UUID just works. Skip fields the form already wrote (in
+  // customFields) so we don't overwrite the user's just-submitted values.
+  const formWrittenFieldIds = new Set(customFields.map((c) => c.id));
+  await propagateWorkspaceFields({
+    sourceTask: activeClientTask,
+    destTaskId: newTask.id,
+    clientId,
+    skipFieldIds: formWrittenFieldIds,
+    label: 'campaign-intake',
+  });
 
   // Update Active Clients master row with: Subject Type, Submitted-At, Supabase Row ID
   if (activeClientTask) {
@@ -212,7 +260,14 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId }) {
     }
   }
 
-  return { task_id: newTask.id, active_client_id: activeClientTask?.id || null };
+  // Step 3: PUT status to 'submitted' so ClickUp fires a real taskStatusUpdated
+  // webhook → triggers Worker F0 (flip AC subtask) + W4 (spawn Configuration).
+  await clickupFetch(`/task/${newTask.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status: 'submitted' }),
+  }).catch((e) => console.error('[campaign-intake] status flip to submitted failed:', e.message));
+
+  return { task_id: newTask.id, active_client_id: activeClientTask?.id || null, field_failures: fieldFailures, unresolved };
 }
 
 async function setCustomField(taskId, fieldId, value) {
@@ -220,6 +275,53 @@ async function setCustomField(taskId, fieldId, value) {
     method: 'POST',
     body: JSON.stringify({ value }),
   });
+}
+
+// Propagate workspace-shared custom fields from the AC master onto a new
+// form-list task. Always writes Client ID. Then, for every populated field
+// on the AC master (skipping form-managed fields, attachments, and the
+// linked-task relationship), POSTs the same value onto the dest task.
+// Failures are logged, never thrown.
+async function propagateWorkspaceFields({ sourceTask, destTaskId, clientId, skipFieldIds, label }) {
+  // 1. Always set Client ID — workspace-shared field, same UUID on every list
+  const CLIENT_ID_FIELD_UUID = 'fb5566ed-7a97-4337-a698-84b07d581fb8';
+  if (clientId) {
+    await setCustomField(destTaskId, CLIENT_ID_FIELD_UUID, clientId)
+      .catch((e) => console.error(`[${label}] Client ID write failed:`, e.message));
+  }
+  if (!sourceTask) return;
+
+  // 2. Walk AC master's custom fields, copy populated workspace-shared ones
+  for (const f of sourceTask.custom_fields || []) {
+    const fid = f.id;
+    if (!fid || skipFieldIds?.has(fid)) continue;
+    if (fid === CLIENT_ID_FIELD_UUID) continue; // already done above
+    // Skip relationship/attachment fields — they shouldn't be cloned by value
+    if (f.type === 'list_relationship' || f.type === 'attachment') continue;
+    const v = f.value;
+    if (v === undefined || v === null || v === '' ||
+        (Array.isArray(v) && v.length === 0) ||
+        (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)) {
+      continue;
+    }
+    // For drop_down: ClickUp returns the option's orderindex (number) or id
+    // (string). The set-field endpoint accepts orderindex on writes, so pass
+    // through. For users field, value is array of objects; skip — collaborators
+    // shouldn't be auto-copied to form tasks.
+    if (f.type === 'users') continue;
+    let writeValue = v;
+    if (f.type === 'drop_down' && typeof v === 'object' && v?.orderindex !== undefined) {
+      writeValue = v.orderindex;
+    }
+    if (f.type === 'labels' && Array.isArray(v)) {
+      // ClickUp returns label objects {id,label,...}; setter wants array of UUIDs
+      writeValue = v.map((opt) => (typeof opt === 'string' ? opt : opt.id)).filter(Boolean);
+      if (!writeValue.length) continue;
+    }
+    await setCustomField(destTaskId, fid, writeValue).catch((e) =>
+      console.error(`[${label}] propagate field "${f.name}" failed:`, e.message),
+    );
+  }
 }
 
 
