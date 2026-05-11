@@ -98,7 +98,7 @@ export default async function handler(req, res) {
   });
 
   // 4) Sheets webhook — best effort
-  await syncSheets({ state, clientId, submittedAt, supabaseRowId: row.id })
+  await syncSheets({ state, secrets, clientId, submittedAt, supabaseRowId: row.id })
     .catch((e) => errors.push({ step: 'sheets', detail: String(e.message || e) }));
 
   res.setHeader('Cache-Control', 'no-store');
@@ -334,7 +334,7 @@ function formatValue(v) {
 
 // ─── Sheets webhook ────────────────────────────────────────────────────
 
-async function syncSheets({ state, clientId, submittedAt, supabaseRowId }) {
+async function syncSheets({ state, secrets, clientId, submittedAt, supabaseRowId }) {
   const url = process.env.SHEETS_WEBHOOK_URL;
   if (!url) return;
   // Strip clientId from payload — already promoted to top-level client_id,
@@ -349,6 +349,7 @@ async function syncSheets({ state, clientId, submittedAt, supabaseRowId }) {
       submitted_at: submittedAt,
       supabase_row_id: supabaseRowId,
       payload,
+      secrets: secrets || {},
     }),
   });
 }

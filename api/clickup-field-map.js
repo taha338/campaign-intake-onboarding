@@ -125,6 +125,16 @@ export const FIELD_IDS = {
   "Time Zone": "553465c7-1b73-48ff-bd4f-ffbf22c63b2b",
   "Volunteer link": "c6f5a921-77c1-4a2a-9d56-a7c8ab10e0a4",
   "Voter file access": "8bdc6d16-8d1a-4b42-b515-7108750130c8",
+  "Registrar Username": "f883c2f6-365d-4d61-a095-260a1b77fd77",
+  "Registrar Password": "edd8b58d-4b8b-4228-9b11-7b3d83f494cd",
+  "Registrar 2FA Enabled": "04a5bfad-8a2e-424e-bf90-ef4eff0105ed",
+  "Registrar 2FA Owner": "e9e8ba29-f908-4bc9-8d4c-a7cbf20e33ea",
+  "Email Admin Username": "a2069495-df15-4201-a42a-af713bb5bad9",
+  "Email Admin Password": "b2f8fe0d-4f50-40fc-809d-dbbac6178311",
+  "Email Admin 2FA Enabled": "3fdefb9d-44b7-46c0-b059-6c374bc41292",
+  "Email Admin 2FA Owner": "6bf0ac6a-88a9-40ab-8855-734d91c5e316",
+  "Existing Site Admin Credentials": "7121a9a2-e96b-487c-aa4d-541aa9364cad",
+
 };
 
 // field name → ClickUp custom field UUID (Active Clients master)
@@ -259,4 +269,14 @@ export const FIELD_TYPES = {
   "Time Zone": "drop_down",
   "Volunteer link": "url",
   "Voter file access": "text",
+  "Registrar Username": "short_text",
+  "Registrar Password": "short_text",
+  "Registrar 2FA Enabled": "short_text",
+  "Registrar 2FA Owner": "short_text",
+  "Email Admin Username": "short_text",
+  "Email Admin Password": "short_text",
+  "Email Admin 2FA Enabled": "short_text",
+  "Email Admin 2FA Owner": "short_text",
+  "Existing Site Admin Credentials": "text",
+
 };

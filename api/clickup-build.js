@@ -113,16 +113,14 @@ export const STATE_TO_FIELD = {
   websiteLive:                   'Is the website live?',
 };
 
-// Secrets-side mapping (text fields capturing access notes, NOT credentials).
-// We pass the raw access-method note text — actual credentials live in
-// Supabase strict-RLS table only.
+// Secrets-side mapping. As of 2026-05-11 ALL 27 secret fields — including raw
+// credentials — are pushed to ClickUp custom fields per product decision.
+// Supabase `campaign_intake_secrets` remains the canonical store.
 export const SECRET_TO_FIELD = {
   pressListAccess:           'Press list / media database access',
   memberPortalAccess:        'Member portal access',
   membershipDbAccess:        'Membership Database Access',
   newSiteHostingAdminAccess: 'New Site Hosting Admin Access',
-  // ── Added 2026-05 (Wix-spec parity access notes; credentials stay
-  // Supabase-only and are NEVER mapped here) ──
   '10dlcBrandRegistrationInfo':    '10DLC brand registration info',
   dnsAdminAccess:                  'DNS Admin Access',
   donorCrmAccess:                  'Donor CRM access',
@@ -136,6 +134,17 @@ export const SECRET_TO_FIELD = {
   paymentProviderAccess:           'Payment Provider Account Access',
   searchConsoleAccess:             'Search console access',
   voterFileAccess:                 'Voter file access',
+  filingPaperworkUploads:          'Filing paperwork uploads',
+  // ── Raw credentials (added 2026-05-11) ──
+  registrarUsername:               'Registrar Username',
+  registrarPassword:               'Registrar Password',
+  registrar2faEnabled:             'Registrar 2FA Enabled',
+  registrar2faOwner:               'Registrar 2FA Owner',
+  emailAdminUsername:              'Email Admin Username',
+  emailAdminPassword:              'Email Admin Password',
+  emailAdmin2faEnabled:            'Email Admin 2FA Enabled',
+  emailAdmin2faOwner:              'Email Admin 2FA Owner',
+  existingSiteAdminCredentials:    'Existing Site Admin Credentials',
 };
 
 const JSON_FIELDS = new Set(['users', 'hardMilestones', 'coalitionLeads', 'internalCommitteeChairs']);
