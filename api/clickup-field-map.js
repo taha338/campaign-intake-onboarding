@@ -1,5 +1,7 @@
-// AUTO-GENERATED from form-fieldmaps/created_fields_manifest.json
-// Do not edit by hand — regenerate via form-fieldmaps/build_field_maps.py
+// Originally generated from form-fieldmaps/created_fields_manifest.json; that
+// generator is no longer in the repo, so this file is now hand-maintained.
+// Every UUID here must match a real custom field on PRIMARY_LIST_ID — verify
+// against GET /list/{id}/field before adding or changing an entry.
 
 export const PRIMARY_LIST_ID  = "901113726567";
 export const ACTIVE_CLIENTS_LIST_ID = "901113554047";
@@ -79,7 +81,7 @@ export const FIELD_IDS = {
   "E-commerce Store Admin Access": "74711033-29a3-4115-8038-b2bf034362a2",
   "E-commerce store?": "5ac1ac44-0990-49d0-b2c2-9420e71b1c93",
   "EIN / Tax ID": "0cfbb078-acf5-4da8-8c84-9001d214e27b",
-  "Election year": "9339543f-0200-4402-a4e3-3fe2a5ca3d12",
+  "Election year": "93f815e7-5df6-4ccf-8726-db3adcae22bb",
   "Email Address (submitter)": "615bf87b-49b9-41db-8b04-84563db5a92e",
   "Email deliverability (SPF/DKIM/DMARC) notes": "3da8f97c-ca3c-4019-bd63-301c4969a6e6",
   "Email marketing access": "483d4332-37f6-45e4-aabf-db19ba502f26",
@@ -135,6 +137,39 @@ export const FIELD_IDS = {
   "Email Admin 2FA Owner": "6bf0ac6a-88a9-40ab-8855-734d91c5e316",
   "Existing Site Admin Credentials": "7121a9a2-e96b-487c-aa4d-541aa9364cad",
 
+  // ── Added 2026-05-11 (Nonprofit + PAC support — Pass 2) ──
+  // Nonprofit Legal Name / States Covered / City / Founded Year were deleted from
+  // ClickUp on 2026-05-12 (consolidated with existing fields); see clickup-build.js.
+  "Nonprofit Type":                   "27c04c95-aa96-4b49-b9cf-205d4108e7fa",
+  "Nonprofit Scope":                  "c27b175c-202f-41cf-903d-6c9a7bf4e5b4",
+  "Nonprofit Mission":                "72b2b164-9b05-45e6-8734-5b7b2c89de52",
+  "Nonprofit Cause Areas":            "22738e6b-18c0-4fc3-9e8e-fd4a49a91b46",
+  "Nonprofit Membership-Based?":      "a536e32a-aaec-4a5f-a5c1-bff48cc208d6",
+  "IRS Determination Status":         "3469f8d5-2a90-4e22-806e-ed26e39ae69d",
+  "IRS Determination Date":           "a5c50974-1e15-4ef3-abf4-0cfde826cb6f",
+  "Fiscal Year End":                  "bca14fd6-a095-407c-9fd6-91f70d9f12cb",
+  "Fiscal Sponsor":                   "f5e28bf2-20e7-4d36-a772-7fe5fea60de9",
+  "State of Incorporation":           "5f284065-4a06-429c-a054-0d47abfc2cef",
+  "Affiliated Sister Org (c3/c4/c6)": "8c14cf50-17ff-4174-a783-f1c570fac0d8",
+  "501(h) Election Made?":            "5c652c0c-9727-4cb8-a1c2-9ba485b8a324",
+  "Lobbying Activity":                "7847b42b-11c6-4080-9ac0-77c56fcbdec7",
+  "PAC ID":                           "6946f41b-3bf1-4d4f-a37b-ffaa43e9d4d7",
+  "PAC Legal Name":                   "e5c44933-fe12-4788-88aa-b42770e0beea",
+  "PAC Type":                         "2075e1d9-7ea4-40bf-a596-ab5f87de495e",
+  "PAC Scope":                        "d22bff1d-99c0-47ef-a607-68923557f300",
+  "PAC States Covered":               "95001b04-eb1b-4fb6-97ea-48ed3003f686",
+  "FEC Committee ID":                 "3f6b54c9-65b4-4530-9556-7294e4555b6a",
+  "State Committee IDs (JSON)":       "b4cac21a-f5f5-4af1-becd-3fb552371523",
+  "PAC Connected Status":             "cb4801ec-fce7-44c0-8360-4a4b3543856f",
+  "PAC Sponsoring Organization":      "fadfe281-7473-42d9-b7fa-8a0b468b8402",
+  "PAC IE-Only?":                     "ac7cfd70-e4ac-4ccc-af70-48bf22587c51",
+  "FEC Registration Status":          "56094136-ecb5-4a5d-b976-8d9ae9cb1ebc",
+  "PAC Date Registered":              "c7fd575f-aee5-4c66-aaac-c88c062e8536",
+  "PAC Affiliated Committees":        "b8f881da-af43-4112-a6ce-4bea4cd23ef1",
+  "PAC Mission":                      "f9beeb12-f70c-4888-8128-ff2477a9f7b9",
+  "PAC Year Established":             "f8bcccef-0c3a-4409-a9bb-3dec392316a1",
+  "PAC Primary Activity":             "a64e3681-bef7-4a74-9d68-5fbd7d5d6300",
+  "PAC Filing Frequency":             "5d02fb31-5889-4c19-a2fd-7c2719ae4c9a",
 };
 
 // field name → ClickUp custom field UUID (Active Clients master)
@@ -223,7 +258,7 @@ export const FIELD_TYPES = {
   "E-commerce Store Admin Access": "text",
   "E-commerce store?": "drop_down",
   "EIN / Tax ID": "short_text",
-  "Election year": "short_text",
+  "Election year": "drop_down",
   "Email Address (submitter)": "email",
   "Email deliverability (SPF/DKIM/DMARC) notes": "text",
   "Email marketing access": "text",
@@ -279,4 +314,36 @@ export const FIELD_TYPES = {
   "Email Admin 2FA Owner": "short_text",
   "Existing Site Admin Credentials": "text",
 
+  // ── Added 2026-05-11 (Nonprofit + PAC support — Pass 2) ──
+  // Deleted dupes 2026-05-12: Legal Name / States Covered / City / Founded Year
+  "Nonprofit Type":                   "drop_down",
+  "Nonprofit Scope":                  "drop_down",
+  "Nonprofit Mission":                "text",
+  "Nonprofit Cause Areas":            "short_text",
+  "Nonprofit Membership-Based?":      "drop_down",
+  "IRS Determination Status":         "drop_down",
+  "IRS Determination Date":           "date",
+  "Fiscal Year End":                  "short_text",
+  "Fiscal Sponsor":                   "short_text",
+  "State of Incorporation":           "short_text",
+  "Affiliated Sister Org (c3/c4/c6)": "short_text",
+  "501(h) Election Made?":            "drop_down",
+  "Lobbying Activity":                "drop_down",
+  "PAC ID":                           "short_text",
+  "PAC Legal Name":                   "short_text",
+  "PAC Type":                         "drop_down",
+  "PAC Scope":                        "drop_down",
+  "PAC States Covered":               "short_text",
+  "FEC Committee ID":                 "short_text",
+  "State Committee IDs (JSON)":       "text",
+  "PAC Connected Status":             "drop_down",
+  "PAC Sponsoring Organization":      "short_text",
+  "PAC IE-Only?":                     "drop_down",
+  "FEC Registration Status":          "drop_down",
+  "PAC Date Registered":              "date",
+  "PAC Affiliated Committees":        "short_text",
+  "PAC Mission":                      "text",
+  "PAC Year Established":             "short_text",
+  "PAC Primary Activity":             "drop_down",
+  "PAC Filing Frequency":             "drop_down",
 };

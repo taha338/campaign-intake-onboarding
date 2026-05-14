@@ -28,6 +28,11 @@ import {
 import {
   SUBMITTER_ROLES, ORGANIZATION_TYPES, PARTY_TYPES, PARTY_SCOPES, US_STATES,
   TIME_ZONES, ELECTION_YEARS, PARTISAN_RACE_OPTIONS,
+  NONPROFIT_TYPES, NONPROFIT_SCOPES, IRS_DETERMINATION_STATUS,
+  LOBBYING_ACTIVITY, NONPROFIT_CAUSE_AREAS,
+  PAC_TYPES, PAC_SCOPES, FEC_REGISTRATION_STATUS,
+  PAC_PRIMARY_ACTIVITY, PAC_CONNECTED_STATUS, FEC_FILING_FREQUENCIES,
+  YES_NO, YES_NO_NA,
 } from './lib/options';
 
 /* Stage list — used by ProgressBar only. Each Stage* component computes
@@ -53,7 +58,7 @@ function Stage1Subject() {
   return (
     <StageShell number={1} title="Who's this for?" subtitle="A few quick details about you and your subject so we can tailor the rest of the form." isFirst canContinue={canContinue}>
       <SubjectTypeToggle />
-      {(state.subjectType === 'candidate' || state.subjectType === 'party') && (
+      {(state.subjectType === 'candidate' || state.subjectType === 'party' || state.subjectType === 'nonprofit' || state.subjectType === 'pac') && (
         <div className="mt-6 space-y-5">
           <TwoCol>
             <TextField required label="Submitter Full Name" value={state.submitterName} onChange={(v) => update({ submitterName: v })} placeholder="Jane Doe" />
@@ -100,15 +105,31 @@ function Stage2Org() {
    STAGE 3 — Race / Jurisdiction (candidate) or Party Identity (party)
    ───────────────────────────────────────────────────────────────── */
 function Stage3Race() {
-  const { state, update, isCandidate, isParty } = useIntake();
+  const { state, update, isCandidate, isParty, isNonprofit, isPac } = useIntake();
   const canContinue = isCandidate
     ? Boolean(state.candidateFullLegalName && state.officeSought && state.candState && state.electionYear)
-    : Boolean(state.partyName && state.partyType && state.partyScope);
+    : isParty
+    ? Boolean(state.partyName && state.partyType && state.partyScope)
+    : isNonprofit
+    ? Boolean(state.nonprofitType && state.nonprofitScope)
+    : isPac
+    ? Boolean(state.pacLegalName && state.pacType && state.pacScope && state.pacFecRegistrationStatus)
+    : false;
+  const title = isCandidate ? 'Race & Jurisdiction'
+    : isParty ? 'Party Identity'
+    : isNonprofit ? 'Nonprofit Identity'
+    : isPac ? 'PAC Identity'
+    : 'Identity';
+  const subtitle = isCandidate ? 'Which office, where, and when.'
+    : isParty ? 'What kind of party, and where it operates.'
+    : isNonprofit ? 'Tax-exempt classification, mission, and scope.'
+    : isPac ? 'FEC / state registration, type, and scope.'
+    : '';
   return (
     <StageShell
       number={3}
-      title={isCandidate ? 'Race & Jurisdiction' : 'Party Identity'}
-      subtitle={isCandidate ? 'Which office, where, and when.' : "What kind of party, and where it operates."}
+      title={title}
+      subtitle={subtitle}
       canContinue={canContinue}
     >
       {isCandidate && (
@@ -146,6 +167,76 @@ function Stage3Race() {
             <TextField required label="City / County" value={state.cityCounty} onChange={(v) => update({ cityCounty: v })} placeholder="e.g. Travis County" />
           )}
           <TextField label="Founded Year" optional value={state.foundedYear} onChange={(v) => update({ foundedYear: v.replace(/[^0-9]/g, '').slice(0, 4) })} placeholder="YYYY" />
+        </>
+      )}
+      {isNonprofit && (
+        <>
+          <p className="text-xs text-[var(--color-op-muted)]">Your nonprofit's legal name was captured in Stage 2 (<b>{state.orgLegalName || '—'}</b>).</p>
+          <TwoCol>
+            <Select required label="Nonprofit Type" value={state.nonprofitType} onChange={(v) => update({ nonprofitType: v })} options={NONPROFIT_TYPES} />
+            <Select required label="Nonprofit Scope" value={state.nonprofitScope} onChange={(v) => update({ nonprofitScope: v })} options={NONPROFIT_SCOPES} />
+          </TwoCol>
+          {(state.nonprofitScope === 'Multi-State' || state.nonprofitScope === 'National') && (
+            <MultiSelectChips required label="States Covered" values={state.nonprofitStatesCovered} onChange={(v) => update({ nonprofitStatesCovered: v })} options={US_STATES} />
+          )}
+          {(state.nonprofitScope === 'Statewide' || state.nonprofitScope === 'Local') && (
+            <Select required label="Primary State" value={state.nonprofitStateOfIncorporation} onChange={(v) => update({ nonprofitStateOfIncorporation: v })} options={US_STATES} />
+          )}
+          {state.nonprofitScope === 'Local' && (
+            <TextField label="City / County" value={state.nonprofitCityCounty} onChange={(v) => update({ nonprofitCityCounty: v })} placeholder="e.g. Travis County" />
+          )}
+          <TextArea label="Mission Statement" value={state.nonprofitMission} onChange={(v) => update({ nonprofitMission: v })} rows={3} help="One or two sentences. Used in voice & tone." />
+          <MultiSelectChips label="Primary Cause / Issue Areas" optional values={state.nonprofitCauseAreas} onChange={(v) => update({ nonprofitCauseAreas: v })} options={NONPROFIT_CAUSE_AREAS} />
+          <TwoCol>
+            <TextField label="Founded Year" optional value={state.nonprofitFoundedYear} onChange={(v) => update({ nonprofitFoundedYear: v.replace(/[^0-9]/g, '').slice(0, 4) })} placeholder="YYYY" />
+            <TextField label="Fiscal Year End (MM-DD)" optional value={state.nonprofitFiscalYearEnd} onChange={(v) => update({ nonprofitFiscalYearEnd: v })} placeholder="06-30" />
+          </TwoCol>
+          <TwoCol>
+            <Select label="IRS Determination Status" value={state.nonprofitIrsDeterminationStatus} onChange={(v) => update({ nonprofitIrsDeterminationStatus: v })} options={IRS_DETERMINATION_STATUS} />
+            <TextField label="Date of IRS Determination" type="date" optional value={state.nonprofitDeterminationDate} onChange={(v) => update({ nonprofitDeterminationDate: v })} />
+          </TwoCol>
+          <RadioGroup label="Membership-based organization?" value={state.nonprofitMembershipBased} onChange={(v) => update({ nonprofitMembershipBased: v })} options={YES_NO} help="Common for 501(c)(4) advocacy + (c)(6) trade associations." />
+          <TextField label="Affiliated c3 / c4 / c6 Sister Org" optional value={state.nonprofitAffiliatedSisterOrg} onChange={(v) => update({ nonprofitAffiliatedSisterOrg: v })} placeholder="Name + EIN" />
+          <TextField label="Fiscal Sponsor (if applicable)" optional value={state.nonprofitFiscalSponsor} onChange={(v) => update({ nonprofitFiscalSponsor: v })} placeholder="Name + EIN" />
+          <TwoCol>
+            <Select label="501(h) Election Made? (c3 only)" value={state.nonprofit501hElectionMade} onChange={(v) => update({ nonprofit501hElectionMade: v })} options={YES_NO_NA} />
+            <Select label="Lobbying Activity" value={state.nonprofitLobbyingActivity} onChange={(v) => update({ nonprofitLobbyingActivity: v })} options={LOBBYING_ACTIVITY} />
+          </TwoCol>
+        </>
+      )}
+      {isPac && (
+        <>
+          <TwoCol>
+            <TextField required label="PAC Legal Name" value={state.pacLegalName} onChange={(v) => update({ pacLegalName: v })} />
+            <TextField label="PAC ID" optional value={state.pacId} onChange={(v) => update({ pacId: v })} help="Internal or external PAC identifier (separate from FEC Committee ID)." />
+          </TwoCol>
+          <TwoCol>
+            <Select required label="PAC Type" value={state.pacType} onChange={(v) => update({ pacType: v })} options={PAC_TYPES} />
+            <Select required label="PAC Scope" value={state.pacScope} onChange={(v) => update({ pacScope: v })} options={PAC_SCOPES} />
+          </TwoCol>
+          {(state.pacScope === 'Multi-State' || state.pacScope === 'Federal') && (
+            <MultiSelectChips label="States Covered" optional values={state.pacStatesCovered} onChange={(v) => update({ pacStatesCovered: v })} options={US_STATES} />
+          )}
+          <TwoCol>
+            <Select required label="FEC Registration Status" value={state.pacFecRegistrationStatus} onChange={(v) => update({ pacFecRegistrationStatus: v })} options={FEC_REGISTRATION_STATUS} />
+            <TextField label="FEC Committee ID" optional value={state.pacFecCommitteeId} onChange={(v) => update({ pacFecCommitteeId: v })} placeholder="C00XXXXXX" />
+          </TwoCol>
+          <TwoCol>
+            <Select label="Connected vs Non-connected (Federal)" value={state.pacConnectedStatus} onChange={(v) => update({ pacConnectedStatus: v })} options={PAC_CONNECTED_STATUS} />
+            <RadioGroup label="Independent-Expenditure-Only? (Super PAC)" value={state.pacIndependentExpenditureOnly} onChange={(v) => update({ pacIndependentExpenditureOnly: v })} options={YES_NO} />
+          </TwoCol>
+          <TextField label="Sponsoring Organization (if connected)" optional value={state.pacSponsoringOrganization} onChange={(v) => update({ pacSponsoringOrganization: v })} />
+          <TextField label="Affiliated Committees Under Common Control" optional value={state.pacAffiliatedCommittees} onChange={(v) => update({ pacAffiliatedCommittees: v })} help="Free-text list — formalize later." />
+          <TextArea label="Mission / Issue Focus" optional value={state.pacMission} onChange={(v) => update({ pacMission: v })} rows={3} />
+          <TwoCol>
+            <TextField label="Year Established" optional value={state.pacYearEstablished} onChange={(v) => update({ pacYearEstablished: v.replace(/[^0-9]/g, '').slice(0, 4) })} placeholder="YYYY" />
+            <Select required label="Election Year (cycle focus)" value={state.electionYear} onChange={(v) => update({ electionYear: v })} options={ELECTION_YEARS} />
+          </TwoCol>
+          <TwoCol>
+            <Select label="Primary Activity" value={state.pacPrimaryActivity} onChange={(v) => update({ pacPrimaryActivity: v })} options={PAC_PRIMARY_ACTIVITY} />
+            <Select label="FEC Filing Frequency" value={state.pacFilingFrequency} onChange={(v) => update({ pacFilingFrequency: v })} options={FEC_FILING_FREQUENCIES} />
+          </TwoCol>
+          <TextField label="Date Registered with FEC / State" type="date" optional value={state.pacDateRegistered} onChange={(v) => update({ pacDateRegistered: v })} />
         </>
       )}
     </StageShell>

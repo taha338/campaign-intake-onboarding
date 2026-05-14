@@ -25,7 +25,7 @@ const initialState = {
   optInDataUsersOps: '',        // 'yes' | 'no' | ''
 
   // ── A. Submitter & Subject
-  subjectType: '',            // candidate | party (drives all conditionals)
+  subjectType: '',            // candidate | party | nonprofit | pac (drives all conditionals)
   submitterName: '',
   submitterEmail: '',
   submitterRole: '',
@@ -59,6 +59,45 @@ const initialState = {
   electionYear: '',
   partisanRace: '',
   affiliatedPacs: '',
+
+  // ── C-NP. Nonprofit Identity (Stage 3 — nonprofit branch)
+  nonprofitLegalName: '',
+  nonprofitType: '',
+  nonprofitScope: '',
+  nonprofitStatesCovered: [],
+  nonprofitCityCounty: '',
+  nonprofitMission: '',
+  nonprofitCauseAreas: [],
+  nonprofitFoundedYear: '',
+  nonprofitMembershipBased: '',         // Yes | No
+  nonprofitIrsDeterminationStatus: '',
+  nonprofitDeterminationDate: '',
+  nonprofitFiscalYearEnd: '',
+  nonprofitFiscalSponsor: '',
+  nonprofitStateOfIncorporation: '',
+  nonprofitOperatingStates: [],
+  nonprofitAffiliatedSisterOrg: '',
+  nonprofit501hElectionMade: '',        // Yes | No | N/A
+  nonprofitLobbyingActivity: '',
+
+  // ── C-PAC. PAC Identity (Stage 3 — pac branch)
+  pacId: '',
+  pacLegalName: '',
+  pacType: '',
+  pacScope: '',
+  pacStatesCovered: [],
+  pacFecCommitteeId: '',
+  pacStateCommitteeIds: [{ state: '', id: '' }],
+  pacConnectedStatus: '',
+  pacSponsoringOrganization: '',
+  pacIndependentExpenditureOnly: '',    // Yes | No
+  pacFecRegistrationStatus: '',
+  pacDateRegistered: '',
+  pacAffiliatedCommittees: '',
+  pacMission: '',
+  pacYearEstablished: '',
+  pacPrimaryActivity: '',
+  pacFilingFrequency: '',
 
   // ── D. Web Presence
   primaryWebsite: '',
@@ -261,7 +300,9 @@ export function IntakeProvider({ children }) {
 
   const isParty = state.subjectType === 'party';
   const isCandidate = state.subjectType === 'candidate';
-  const subjectChosen = isParty || isCandidate;
+  const isNonprofit = state.subjectType === 'nonprofit';
+  const isPac = state.subjectType === 'pac';
+  const subjectChosen = isParty || isCandidate || isNonprofit || isPac;
 
   const goToStage = useCallback((s) => dispatch({ type: 'SET_STAGE', payload: s }), []);
   const nextStage = useCallback(() => {
@@ -285,11 +326,13 @@ export function IntakeProvider({ children }) {
     secretsDispatch,
     isParty,
     isCandidate,
+    isNonprofit,
+    isPac,
     subjectChosen,
     goToStage,
     nextStage,
     prevStage,
-  }), [state, secrets, update, updateSecret, updateRepeating, addRepeating, removeRepeating, isParty, isCandidate, subjectChosen, goToStage, nextStage, prevStage]);
+  }), [state, secrets, update, updateSecret, updateRepeating, addRepeating, removeRepeating, isParty, isCandidate, isNonprofit, isPac, subjectChosen, goToStage, nextStage, prevStage]);
 
   return <IntakeContext.Provider value={value}>{children}</IntakeContext.Provider>;
 }

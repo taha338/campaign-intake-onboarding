@@ -111,6 +111,45 @@ export const STATE_TO_FIELD = {
   timeZone:                      'Time Zone',
   volunteerLink:                 'Volunteer link',
   websiteLive:                   'Is the website live?',
+
+  // ── Added 2026-05-11 (Nonprofit + PAC support — Pass 2) ──
+  // Nonprofit (Stage 3 — nonprofit branch)
+  // NOTE: `nonprofitLegalName` is captured via Stage 2 `orgLegalName` → 'Legal organization name'.
+  // States Covered / City / County / Founded Year reuse the party-side shared fields.
+  nonprofitType:                    'Nonprofit Type',
+  nonprofitScope:                   'Nonprofit Scope',
+  nonprofitStatesCovered:           'States Covered',
+  nonprofitCityCounty:              'City / County',
+  nonprofitMission:                 'Nonprofit Mission',
+  nonprofitCauseAreas:              'Nonprofit Cause Areas',
+  nonprofitFoundedYear:             'Founded Year',
+  nonprofitMembershipBased:         'Nonprofit Membership-Based?',
+  nonprofitIrsDeterminationStatus:  'IRS Determination Status',
+  nonprofitDeterminationDate:       'IRS Determination Date',
+  nonprofitFiscalYearEnd:           'Fiscal Year End',
+  nonprofitFiscalSponsor:           'Fiscal Sponsor',
+  nonprofitStateOfIncorporation:    'State of Incorporation',
+  nonprofitAffiliatedSisterOrg:     'Affiliated Sister Org (c3/c4/c6)',
+  nonprofit501hElectionMade:        '501(h) Election Made?',
+  nonprofitLobbyingActivity:        'Lobbying Activity',
+  // PAC (Stage 3 — pac branch)
+  pacId:                            'PAC ID',
+  pacLegalName:                     'PAC Legal Name',
+  pacType:                          'PAC Type',
+  pacScope:                         'PAC Scope',
+  pacStatesCovered:                 'PAC States Covered',
+  pacFecCommitteeId:                'FEC Committee ID',
+  pacStateCommitteeIds:             'State Committee IDs (JSON)',
+  pacConnectedStatus:               'PAC Connected Status',
+  pacSponsoringOrganization:        'PAC Sponsoring Organization',
+  pacIndependentExpenditureOnly:    'PAC IE-Only?',
+  pacFecRegistrationStatus:         'FEC Registration Status',
+  pacDateRegistered:                'PAC Date Registered',
+  pacAffiliatedCommittees:          'PAC Affiliated Committees',
+  pacMission:                       'PAC Mission',
+  pacYearEstablished:               'PAC Year Established',
+  pacPrimaryActivity:               'PAC Primary Activity',
+  pacFilingFrequency:               'PAC Filing Frequency',
 };
 
 // Secrets-side mapping. As of 2026-05-11 ALL 27 secret fields — including raw
@@ -147,7 +186,13 @@ export const SECRET_TO_FIELD = {
   existingSiteAdminCredentials:    'Existing Site Admin Credentials',
 };
 
-const JSON_FIELDS = new Set(['users', 'hardMilestones', 'coalitionLeads', 'internalCommitteeChairs']);
+const JSON_FIELDS = new Set([
+  'users', 'hardMilestones', 'coalitionLeads', 'internalCommitteeChairs',
+  // PAC state committee IDs is array of {state, id} objects — serialize as JSON.
+  // String-array fields (nonprofitStatesCovered, nonprofitCauseAreas, pacStatesCovered)
+  // are left out so they comma-join into readable text per the short_text branch.
+  'pacStateCommitteeIds',
+]);
 
 const empty = (v) =>
   v === undefined || v === null ||
@@ -178,6 +223,66 @@ export async function getDropdownOptionsMap() {
     }
   }
   return map;
+}
+
+// Some form fields capture a value that doesn't literally match any ClickUp
+// dropdown option name, so resolveOption() drops them. These maps translate
+// the raw form value → the canonical ClickUp option name before resolution.
+// fieldName → { rawValueLowercased: 'Canonical ClickUp Option Name' }.
+const DROPDOWN_VALUE_ALIASES = {
+  'Time Zone': {
+    'america/new_york':    'Eastern (ET)',
+    'america/detroit':     'Eastern (ET)',
+    'america/chicago':     'Central (CT)',
+    'america/denver':      'Mountain (MT)',
+    'america/phoenix':     'Mountain (MT)',
+    'america/los_angeles': 'Pacific (PT)',
+    'america/anchorage':   'Alaska (AKT)',
+    'pacific/honolulu':    'Hawaii (HT)',
+  },
+  // Organisation type: PAC subtypes all collapse to the one combined PAC
+  // option in ClickUp's "Organization Type" dropdown; the form's
+  // "501(c)(x) — <desc>" / "527 / Political Org" labels collapse to ClickUp's
+  // bare "501(c)(x)" / "527" options.
+  'Organization type': {
+    'federal pac':       'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    'state pac':         'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    'super pac':         'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    'hybrid pac':        'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    'carey committee':   'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    'carey pac':         'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    'leadership pac':    'Federal/State/Super/Hybrid/Carey/Leadership PAC',
+    '501(c)(3) — charitable':                '501(c)(3)',
+    '501(c)(4) — social welfare / advocacy': '501(c)(4)',
+    '501(c)(6) — trade association':         '501(c)(6)',
+    '527 / political org':                   '527',
+  },
+};
+
+// A few dropdowns need logic rather than a static lookup.
+const DROPDOWN_VALUE_TRANSFORMS = {
+  // "E-commerce store?" is a Yes/No/N/A field, but the form captures the
+  // platform name (e.g. "Shopify"). Any real platform name means "Yes".
+  'E-commerce store?': (raw) => {
+    const v = String(raw ?? '').trim().toLowerCase();
+    if (!v) return raw;
+    if (['no', 'none', 'n/a', 'false'].includes(v)) return 'No';
+    if (['yes', 'true'].includes(v)) return 'Yes';
+    return 'Yes';
+  },
+};
+
+// Normalise a raw form value for a dropdown field into something
+// resolveOption() can match against ClickUp's option names.
+function aliasDropdownValue(fieldName, raw) {
+  const transform = DROPDOWN_VALUE_TRANSFORMS[fieldName];
+  if (transform) return transform(raw);
+  const map = DROPDOWN_VALUE_ALIASES[fieldName];
+  if (map) {
+    const hit = map[String(raw ?? '').trim().toLowerCase()];
+    if (hit) return hit;
+  }
+  return raw;
 }
 
 // Resolve a form value → ClickUp dropdown option orderindex (integer).
@@ -234,7 +339,7 @@ export function buildCustomFields(state, secrets = {}, optionsMap = {}) {
       if (isNaN(d.getTime())) return;
       value = d.getTime();
     } else if (type === 'drop_down') {
-      const idx = resolveOption(raw, optionsMap[fid]);
+      const idx = resolveOption(aliasDropdownValue(fieldName, raw), optionsMap[fid]);
       if (idx === null || idx === undefined) {
         unresolved.push({ stateKey, fieldName, fieldId: fid, value: String(raw) });
         return;

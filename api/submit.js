@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   if (!clientId || !/^[A-Za-z0-9_-]{1,40}$/.test(clientId)) {
     return res.status(400).json({ error: 'Valid clientId required' });
   }
-  if (!['candidate', 'party'].includes(state.subjectType)) {
+  if (!['candidate', 'party', 'nonprofit', 'pac'].includes(state.subjectType)) {
     return res.status(400).json({ error: 'Subject type required.' });
   }
 
@@ -58,7 +58,61 @@ export default async function handler(req, res) {
 
   // 1) Main row into Supabase
   const submittedAt = new Date().toISOString();
-  const { data: row, error: rowErr } = await supabase
+
+  // Shred nonprofit + PAC fields out of the payload into top-level columns so
+  // they're directly SQL-filterable (in addition to being stored in `payload`).
+  // Top-level columns are nullable; if your Supabase schema doesn't have them
+  // yet, run the SQL migration shared on 2026-05-12. The insert will still
+  // succeed because we only include columns whose values are present.
+  const toDate = (v) => {
+    if (!v) return null;
+    const s = String(v).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+  const toTextArray = (v) => Array.isArray(v) && v.length ? v : null;
+  const sd = (k) => (typeof state[k] === 'string' && state[k].trim()) ? state[k].trim() : null;
+
+  const topLevel = {
+    // Nonprofit
+    nonprofit_type:                     sd('nonprofitType'),
+    nonprofit_scope:                    sd('nonprofitScope'),
+    nonprofit_states_covered:           toTextArray(state.nonprofitStatesCovered),
+    nonprofit_city_county:              sd('nonprofitCityCounty'),
+    nonprofit_mission:                  sd('nonprofitMission'),
+    nonprofit_cause_areas:              toTextArray(state.nonprofitCauseAreas),
+    nonprofit_founded_year:             sd('nonprofitFoundedYear'),
+    nonprofit_membership_based:         sd('nonprofitMembershipBased'),
+    nonprofit_irs_determination_status: sd('nonprofitIrsDeterminationStatus'),
+    nonprofit_determination_date:       toDate(state.nonprofitDeterminationDate),
+    nonprofit_fiscal_year_end:          sd('nonprofitFiscalYearEnd'),
+    nonprofit_fiscal_sponsor:           sd('nonprofitFiscalSponsor'),
+    nonprofit_state_of_incorporation:   sd('nonprofitStateOfIncorporation'),
+    nonprofit_affiliated_sister_org:    sd('nonprofitAffiliatedSisterOrg'),
+    nonprofit_501h_election_made:       sd('nonprofit501hElectionMade'),
+    nonprofit_lobbying_activity:        sd('nonprofitLobbyingActivity'),
+    // PAC
+    pac_id:                             sd('pacId'),
+    pac_legal_name:                     sd('pacLegalName'),
+    pac_type:                           sd('pacType'),
+    pac_scope:                          sd('pacScope'),
+    pac_states_covered:                 toTextArray(state.pacStatesCovered),
+    pac_fec_committee_id:               sd('pacFecCommitteeId'),
+    pac_state_committee_ids:            Array.isArray(state.pacStateCommitteeIds) && state.pacStateCommitteeIds.length ? state.pacStateCommitteeIds : null,
+    pac_connected_status:               sd('pacConnectedStatus'),
+    pac_sponsoring_organization:        sd('pacSponsoringOrganization'),
+    pac_independent_expenditure_only:   sd('pacIndependentExpenditureOnly'),
+    pac_fec_registration_status:        sd('pacFecRegistrationStatus'),
+    pac_date_registered:                toDate(state.pacDateRegistered),
+    pac_affiliated_committees:          sd('pacAffiliatedCommittees'),
+    pac_mission:                        sd('pacMission'),
+    pac_year_established:               sd('pacYearEstablished'),
+    pac_primary_activity:               sd('pacPrimaryActivity'),
+    pac_filing_frequency:               sd('pacFilingFrequency'),
+  };
+  // Drop nulls so the insert doesn't try to write columns the table may not have
+  for (const k of Object.keys(topLevel)) if (topLevel[k] == null) delete topLevel[k];
+
+  let insertResult = await supabase
     .from('campaign_intakes')
     .insert([{
       client_id:       clientId,
@@ -66,9 +120,29 @@ export default async function handler(req, res) {
       submitted_at:    submittedAt,
       subject_type:    state.subjectType,
       payload:         state,
+      ...topLevel,
     }])
     .select()
     .single();
+
+  // If the migration hasn't been applied yet, Supabase returns 42703
+  // ("column X does not exist"). Retry without the top-level shred so we
+  // never lose a submission. The data is still in `payload` either way.
+  if (insertResult.error && /column.*does not exist|PGRST204|42703/i.test(insertResult.error.message || '')) {
+    console.warn('[campaign-intake] top-level columns missing; retrying with payload-only', insertResult.error.message);
+    insertResult = await supabase
+      .from('campaign_intakes')
+      .insert([{
+        client_id:       clientId,
+        clickup_task_id: state.clickupTaskId || null,
+        submitted_at:    submittedAt,
+        subject_type:    state.subjectType,
+        payload:         state,
+      }])
+      .select()
+      .single();
+  }
+  const { data: row, error: rowErr } = insertResult;
   if (rowErr) {
     return res.status(500).json({ error: 'Supabase insert failed', detail: rowErr.message });
   }
@@ -87,22 +161,60 @@ export default async function handler(req, res) {
     if (secErr) console.error('[campaign-intake] secrets insert failed:', secErr);
   }
 
-  // 3) ClickUp sync — best effort, don't fail submission if ClickUp errors
+  // 3) Build the ClickUp custom_fields[] array ONCE, up front, and persist
+  // it to the Supabase row. The Worker's reconcileDownstreamFields cron reads
+  // `clickup_fields` to gap-fill anything the live sync below drops — form
+  // -specific fields have no Sales record to heal from, so this row is their
+  // only recovery source.
   const errors = [];
-  await syncClickUp({
-    state, secrets, clientId, submittedAt,
-    supabaseRowId: row.id,
-  }).catch((e) => {
+  let customFields = [];
+  let unresolved = [];
+  let fieldFailures = [];
+  try {
+    const optionsMap = await getDropdownOptionsMap();
+    const built = buildCustomFields(state, secrets, optionsMap);
+    customFields = built.fields;
+    unresolved = built.unresolved;
+  } catch (e) {
+    console.error('[campaign-intake] buildCustomFields failed:', e);
+    errors.push({ step: 'build_fields', detail: String(e.message || e) });
+  }
+  if (unresolved.length) {
+    console.warn('[campaign-intake] unresolved dropdown values:', unresolved);
+  }
+  if (customFields.length) {
+    const { error: cfErr } = await supabase
+      .from('campaign_intakes')
+      .update({ clickup_fields: customFields })
+      .eq('id', row.id);
+    if (cfErr) console.error('[campaign-intake] clickup_fields persist failed:', cfErr);
+  }
+
+  // 4) ClickUp sync — best effort, don't fail submission if ClickUp errors.
+  // Whatever this drops, the Worker reconciler heals from clickup_fields above.
+  try {
+    const r = await syncClickUp({
+      state, secrets, clientId, submittedAt,
+      supabaseRowId: row.id, customFields,
+    });
+    fieldFailures = r.fieldFailures || [];
+  } catch (e) {
     console.error('[campaign-intake] ClickUp sync failed:', e);
     errors.push({ step: 'clickup', detail: String(e.message || e) });
-  });
+  }
 
-  // 4) Sheets webhook — best effort
+  // 5) Sheets webhook — best effort
   await syncSheets({ state, secrets, clientId, submittedAt, supabaseRowId: row.id })
     .catch((e) => errors.push({ step: 'sheets', detail: String(e.message || e) }));
 
   res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).json({ ok: true, id: row.id, syncErrors: errors });
+  return res.status(200).json({
+    ok: true,
+    id: row.id,
+    syncErrors: errors,
+    fieldWriteFailures: fieldFailures,
+    unresolvedDropdowns: unresolved,
+  });
 }
 
 
@@ -147,7 +259,7 @@ async function findActiveClientByClientId(clientId) {
   return null;
 }
 
-async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowId }) {
+async function syncClickUp({ state, clientId, submittedAt, supabaseRowId, customFields }) {
   const displayName = state.displayName || state.candidateName || state.partyName || clientId;
   const taskName    = `${displayName} (${clientId}) — Campaign Intake`;
 
@@ -159,15 +271,8 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
   // task description and obscuring the actual structured data.
   const description = '';
 
-  // Resolve dropdown options once, then build structured custom_fields[]
-  const optionsMap = await getDropdownOptionsMap().catch((e) => {
-    console.warn('[campaign-intake] dropdown options fetch failed:', e.message);
-    return {};
-  });
-  const { fields: customFields, unresolved } = buildCustomFields(state, secrets, optionsMap);
-  if (unresolved.length) {
-    console.warn('[campaign-intake] unresolved dropdown values:', unresolved);
-  }
+  // customFields is built + persisted to the Supabase row by the caller, so
+  // the Worker reconciler can heal anything dropped by the write loop below.
 
   // Step 1: create the task WITHOUT inline custom_fields. ClickUp's inline
   // custom_fields array silently drops fields beyond ~25-28 entries
@@ -210,10 +315,17 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
 
   // Update Active Clients master row with: Subject Type, Submitted-At, Supabase Row ID
   if (activeClientTask) {
-    // Subject Type was created with options ['Candidate','Party'] → orderindex 0|1
-    const subjectOrderIndex = state.subjectType === 'party' ? 1 : 0;
+    // Subject Type orderindex: 0=Candidate, 1=Party, 2=Nonprofit, 3=PAC
+    // (Nonprofit + PAC options must be added to the ClickUp dropdown UI in that
+    // order, since the ClickUp API rejects modifying options on existing fields.)
+    const ORDER_INDEX_BY_SUBJECT = { candidate: 0, party: 1, nonprofit: 2, pac: 3 };
+    const subjectOrderIndex = ORDER_INDEX_BY_SUBJECT[state.subjectType];
     const updates = [
-      { fid: ACTIVE_CLIENTS_FIELD_IDS['Subject Type'],                  value: subjectOrderIndex },
+      // Only write Subject Type if we have a valid orderindex (i.e. the option
+      // exists in the CU dropdown). Avoids mislabeling nonprofit/PAC as candidate.
+      ...(subjectOrderIndex !== undefined
+        ? [{ fid: ACTIVE_CLIENTS_FIELD_IDS['Subject Type'], value: subjectOrderIndex }]
+        : []),
       { fid: ACTIVE_CLIENTS_FIELD_IDS['Campaign Intake Submitted At'],  value: Date.parse(submittedAt) },
       { fid: ACTIVE_CLIENTS_FIELD_IDS['Form 1 Supabase Row ID'],        value: supabaseRowId },
     ].filter((u) => u.fid && u.value !== undefined && u.value !== null);
@@ -263,7 +375,7 @@ async function syncClickUp({ state, secrets, clientId, submittedAt, supabaseRowI
     body: JSON.stringify({ status: 'submitted' }),
   }).catch((e) => console.error('[campaign-intake] status flip to submitted failed:', e.message));
 
-  return { task_id: newTask.id, active_client_id: activeClientTask?.id || null };
+  return { task_id: newTask.id, active_client_id: activeClientTask?.id || null, fieldFailures };
 }
 
 async function maybeAdvanceAllFormsReceived(activeClientTask, justWrote) {
