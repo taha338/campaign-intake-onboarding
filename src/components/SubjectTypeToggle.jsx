@@ -1,6 +1,13 @@
-import { User, Flag } from 'lucide-react';
+import { User, Flag, Heart, Landmark } from 'lucide-react';
 import { useIntake } from '../context/IntakeContext';
 import { SUBJECT_TYPES } from '../lib/options';
+
+const ICON_BY_ID = {
+  candidate: User,
+  party: Flag,
+  nonprofit: Heart,
+  pac: Landmark,
+};
 
 export default function SubjectTypeToggle() {
   const { state, update } = useIntake();
@@ -10,7 +17,7 @@ export default function SubjectTypeToggle() {
       <div className="grid sm:grid-cols-2 gap-3">
         {SUBJECT_TYPES.map((opt) => {
           const selected = state.subjectType === opt.id;
-          const Icon = opt.id === 'candidate' ? User : Flag;
+          const Icon = ICON_BY_ID[opt.id] || Flag;
           return (
             <button
               key={opt.id}

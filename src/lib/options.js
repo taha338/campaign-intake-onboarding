@@ -4,8 +4,10 @@
  */
 
 export const SUBJECT_TYPES = [
-  { id: 'candidate', label: 'Candidate', desc: 'An individual running for office' },
-  { id: 'party',     label: 'Party / Movement', desc: 'A party, coalition, or political organization' },
+  { id: 'candidate', label: 'Candidate',         desc: 'An individual running for office' },
+  { id: 'party',     label: 'Party / Movement',  desc: 'A party, coalition, or political organization' },
+  { id: 'nonprofit', label: 'Nonprofit',         desc: '501(c)(3), (c)(4), (c)(6), 527, or similar tax-exempt org' },
+  { id: 'pac',       label: 'PAC / Super PAC',   desc: 'Federal, state, Super PAC, hybrid, Carey, or leadership PAC' },
 ];
 
 export const SUBMITTER_ROLES = [
@@ -14,9 +16,19 @@ export const SUBMITTER_ROLES = [
   'Party Chair',
   'Vice Chair',
   'Executive Director',
+  'Development Director',
+  'Board Chair',
+  'Board President',
+  'Program Director',
   'Treasurer',
+  'Assistant Treasurer',
+  'Custodian of Records',
   'Communications Director',
   'Field Director',
+  'Finance Director',
+  'Compliance Officer',
+  'FEC / Election Counsel',
+  'Tax Counsel',
   'Vendor / Consultant',
   'Other',
 ];
@@ -26,9 +38,16 @@ export const ORGANIZATION_TYPES = [
   'State Party',
   'County Party',
   'National Party',
-  'PAC',
-  '501(c)(4)',
-  '501(c)(3)',
+  '501(c)(3) — Charitable',
+  '501(c)(4) — Social Welfare / Advocacy',
+  '501(c)(6) — Trade Association',
+  '527 / Political Org',
+  'Federal PAC',
+  'State PAC',
+  'Super PAC',
+  'Hybrid PAC',
+  'Carey Committee',
+  'Leadership PAC',
   'LLC',
   'Other',
 ];
@@ -115,3 +134,73 @@ export const US_STATES = [
 ];
 
 export const ELECTION_YEARS = ['2026', '2027', '2028', '2029'];
+
+// ── Nonprofit-specific ────────────────────────────────────────
+export const NONPROFIT_TYPES = [
+  '501(c)(3) — Charitable',
+  '501(c)(4) — Social Welfare / Advocacy',
+  '501(c)(6) — Trade Association',
+  '527 / Political Org',
+  'Other',
+];
+
+export const NONPROFIT_SCOPES = ['National', 'Multi-State', 'Statewide', 'Local'];
+
+export const IRS_DETERMINATION_STATUS = [
+  'Approved',
+  'Pending',
+  'Revoked',
+  'Fiscally Sponsored',
+  'N/A',
+];
+
+export const LOBBYING_ACTIVITY = [
+  'None',
+  'Insubstantial (c3 substantial-part test)',
+  '501(h) elected (c3)',
+  'Primary purpose (c4)',
+  'N/A',
+];
+
+export const NONPROFIT_CAUSE_AREAS = [
+  'Education', 'Healthcare', 'Civil Rights', 'Religion', 'Environment',
+  'Veterans', 'Poverty / Hunger', 'Housing', 'Arts & Culture',
+  'Animal Welfare', 'International', 'Civic Engagement', 'Other',
+];
+
+// ── PAC-specific ──────────────────────────────────────────────
+export const PAC_TYPES = [
+  'Federal PAC',
+  'State PAC',
+  'Super PAC',
+  'Hybrid PAC',
+  'Carey Committee',
+  'Leadership PAC',
+  'Other',
+];
+
+export const PAC_SCOPES = ['Federal', 'Multi-State', 'Statewide', 'Local'];
+
+export const FEC_REGISTRATION_STATUS = [
+  'Registered',
+  'In Progress',
+  'Not Yet',
+  'N/A (state-only)',
+];
+
+export const PAC_PRIMARY_ACTIVITY = [
+  'Contributions to candidates',
+  'Independent expenditures',
+  'Both (Hybrid)',
+  'Issue advocacy',
+];
+
+export const PAC_CONNECTED_STATUS = ['Connected', 'Non-connected', 'N/A'];
+
+export const FEC_FILING_FREQUENCIES = [
+  'Monthly',
+  'Quarterly',
+  'Semi-Annual',
+  'Pre/Post-Election Only',
+  'N/A (state-only)',
+];

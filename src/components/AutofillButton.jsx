@@ -10,26 +10,49 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 function buildStatePayload(subjectType) {
   const isParty = subjectType === 'party';
+  const isCandidate = subjectType === 'candidate';
+  const isNonprofit = subjectType === 'nonprofit';
+  const isPac = subjectType === 'pac';
+
+  const orgTypeBySubject = {
+    candidate: 'Candidate Committee',
+    party:     'State Party',
+    nonprofit: '501(c)(4) — Social Welfare / Advocacy',
+    pac:       'Federal PAC',
+  };
+  const orgLegalNameBySubject = {
+    candidate: 'Friends of Jane Test',
+    party:     'Test Liberty Party Inc.',
+    nonprofit: 'Liberty Action Fund Inc.',
+    pac:       'Patriots Forward PAC Inc.',
+  };
+  const displayNameBySubject = {
+    candidate: 'Jane Q. Test',
+    party:     'Test Liberty Party',
+    nonprofit: 'Liberty Action Fund',
+    pac:       'Patriots Forward',
+  };
+
   return {
     subjectType,
 
     // A. Submitter
     submitterName: 'Test Submitter',
     submitterEmail: 'submitter@example.com',
-    submitterRole: 'Campaign Manager',
+    submitterRole: isPac ? 'Treasurer' : isNonprofit ? 'Executive Director' : 'Campaign Manager',
     referralSource: 'Referral via test',
 
     // B. Org
-    orgLegalName: isParty ? 'Test Liberty Party Inc.' : 'Friends of Jane Test',
-    displayName: isParty ? 'Test Liberty Party' : 'Jane Q. Test',
-    orgType: isParty ? 'Political Party' : 'Candidate Committee',
-    partyName: isParty ? 'Test Liberty Party' : '',
-    partyAcronym: isParty ? 'TLP' : '',
-    partyType: isParty ? 'minor' : '',
+    orgLegalName: orgLegalNameBySubject[subjectType],
+    displayName:  displayNameBySubject[subjectType],
+    orgType:      orgTypeBySubject[subjectType],
+    partyName:     isParty ? 'Test Liberty Party' : '',
+    partyAcronym:  isParty ? 'TLP' : '',
+    partyType:     isParty ? 'third-party' : '',
     partyTypeOther: '',
-    partyScope: isParty ? 'state' : '',
-    primaryStateParty: isParty ? 'IL' : '',
-    statesCovered: isParty ? ['IL', 'IN'] : [],
+    partyScope:    isParty ? 'state' : '',
+    primaryStateParty: isParty ? 'Illinois' : '',
+    statesCovered: isParty ? ['Illinois', 'Indiana'] : [],
     cityCounty: 'Springfield, Sangamon County',
     foundedYear: '2020',
     ein: '12-3456789',
@@ -39,14 +62,51 @@ function buildStatePayload(subjectType) {
     orgEmail: 'org@example.com',
     timeZone: 'America/Chicago',
 
-    // C. Race / Jurisdiction
-    candidateFullLegalName: isParty ? '' : 'Jane Quincy Test',
-    officeSought: isParty ? '' : 'State Senate, District 12',
-    candState: isParty ? '' : 'IL',
-    district: isParty ? '' : '12',
-    electionYear: isParty ? '' : '2026',
-    partisanRace: isParty ? '' : 'No',
-    affiliatedPacs: 'Test PAC for Liberty',
+    // C. Race / Jurisdiction (candidate)
+    candidateFullLegalName: isCandidate ? 'Jane Quincy Test' : '',
+    officeSought:           isCandidate ? 'State Senate, District 12' : '',
+    candState:              isCandidate ? 'Illinois' : '',
+    district:               isCandidate ? '12' : '',
+    electionYear:           (isCandidate || isPac) ? '2026' : '',
+    partisanRace:           isCandidate ? 'No' : '',
+    affiliatedPacs:         isParty ? 'Test PAC for Liberty' : '',
+
+    // C-NP. Nonprofit Identity (Pass 1 — Stage 3 nonprofit branch)
+    nonprofitType:                   isNonprofit ? '501(c)(4) — Social Welfare / Advocacy' : '',
+    nonprofitScope:                  isNonprofit ? 'Multi-State' : '',
+    nonprofitStatesCovered:          isNonprofit ? ['Illinois', 'Indiana', 'Iowa'] : [],
+    nonprofitCityCounty:             isNonprofit ? 'Chicago, Cook County' : '',
+    nonprofitMission:                isNonprofit ? 'Advance civil liberty through education and policy advocacy.' : '',
+    nonprofitCauseAreas:             isNonprofit ? ['Civil Rights', 'Civic Engagement'] : [],
+    nonprofitFoundedYear:            isNonprofit ? '2018' : '',
+    nonprofitMembershipBased:        isNonprofit ? 'Yes' : '',
+    nonprofitIrsDeterminationStatus: isNonprofit ? 'Approved' : '',
+    nonprofitDeterminationDate:      isNonprofit ? '2019-04-12' : '',
+    nonprofitFiscalYearEnd:          isNonprofit ? '06-30' : '',
+    nonprofitFiscalSponsor:          isNonprofit ? '' : '',
+    nonprofitStateOfIncorporation:   isNonprofit ? 'Illinois' : '',
+    nonprofitAffiliatedSisterOrg:    isNonprofit ? 'Liberty Education Trust (c3) — EIN 12-3456789' : '',
+    nonprofit501hElectionMade:       isNonprofit ? 'N/A' : '',
+    nonprofitLobbyingActivity:       isNonprofit ? 'Primary purpose (c4)' : '',
+
+    // C-PAC. PAC Identity (Pass 1/2 — Stage 3 PAC branch)
+    pacId:                          isPac ? 'TEST-PAC-001' : '',
+    pacLegalName:                   isPac ? 'Patriots Forward PAC Inc.' : '',
+    pacType:                        isPac ? 'Federal PAC' : '',
+    pacScope:                       isPac ? 'Federal' : '',
+    pacStatesCovered:               isPac ? ['Illinois', 'Indiana', 'Ohio'] : [],
+    pacFecCommitteeId:              isPac ? 'C00TEST456' : '',
+    pacStateCommitteeIds:           isPac ? [{ state: 'Illinois', id: 'IL-PAC-9001' }] : [{ state: '', id: '' }],
+    pacConnectedStatus:             isPac ? 'Non-connected' : '',
+    pacSponsoringOrganization:      isPac ? '' : '',
+    pacIndependentExpenditureOnly:  isPac ? 'No' : '',
+    pacFecRegistrationStatus:       isPac ? 'Registered' : '',
+    pacDateRegistered:              isPac ? '2024-09-01' : '',
+    pacAffiliatedCommittees:        isPac ? 'Liberty Future PAC, Patriots State Fund' : '',
+    pacMission:                     isPac ? 'Support liberty-minded candidates at the federal level.' : '',
+    pacYearEstablished:             isPac ? '2024' : '',
+    pacPrimaryActivity:             isPac ? 'Contributions to candidates' : '',
+    pacFilingFrequency:             isPac ? 'Quarterly' : '',
 
     // D. Web
     primaryWebsite: 'https://example.com',
@@ -215,11 +275,12 @@ export default function AutofillButton() {
   const handleClick = () => {
     const params = new URLSearchParams(window.location.search);
     const urlSubject = (params.get('subject') || '').toLowerCase();
-    if (urlSubject === 'candidate' || urlSubject === 'party') {
+    const valid = ['candidate', 'party', 'nonprofit', 'pac'];
+    if (valid.includes(urlSubject)) {
       fill(urlSubject);
       return;
     }
-    if (state.subjectType === 'candidate' || state.subjectType === 'party') {
+    if (valid.includes(state.subjectType)) {
       fill(state.subjectType);
       return;
     }
@@ -271,17 +332,27 @@ export default function AutofillButton() {
             <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px', color: '#111' }}>
               Autofill: subject type?
             </p>
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <button
                 type="button"
                 onClick={() => { setOpen(false); fill('candidate'); }}
-                style={{ flex: 1, padding: '12px 16px', borderRadius: 8, border: '1px solid #1C2E5B', background: '#1C2E5B', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #1C2E5B', background: '#1C2E5B', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
               >Candidate</button>
               <button
                 type="button"
                 onClick={() => { setOpen(false); fill('party'); }}
-                style={{ flex: 1, padding: '12px 16px', borderRadius: 8, border: '1px solid #B22234', background: '#B22234', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #B22234', background: '#B22234', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
               >Party</button>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); fill('nonprofit'); }}
+                style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #059669', background: '#059669', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+              >Nonprofit</button>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); fill('pac'); }}
+                style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #7c3aed', background: '#7c3aed', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+              >PAC</button>
             </div>
             <button
               type="button"
