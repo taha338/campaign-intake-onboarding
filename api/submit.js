@@ -29,6 +29,7 @@ import {
   FIELD_IDS,
 } from './clickup-field-map.js';
 import { buildCustomFields, getDropdownOptionsMap } from './clickup-build.js';
+import { recordAudit } from './audit.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -144,8 +145,16 @@ export default async function handler(req, res) {
   }
   const { data: row, error: rowErr } = insertResult;
   if (rowErr) {
+    await recordAudit(supabase, {
+      form: 'campaign-intake', client_id: clientId, stage: 'supabase_insert',
+      outcome: 'error', detail: rowErr.message,
+    });
     return res.status(500).json({ error: 'Supabase insert failed', detail: rowErr.message });
   }
+  await recordAudit(supabase, {
+    form: 'campaign-intake', client_id: clientId, stage: 'supabase_insert',
+    outcome: 'ok', detail: `row ${row.id}`,
+  });
 
   // 2) Secrets — separate strict-RLS table
   const hasSecrets = Object.values(secrets || {}).some(Boolean);
@@ -192,20 +201,60 @@ export default async function handler(req, res) {
 
   // 4) ClickUp sync — best effort, don't fail submission if ClickUp errors.
   // Whatever this drops, the Worker reconciler heals from clickup_fields above.
+  const cuStart = Date.now();
+  resetClickupRetryCount();
   try {
     const r = await syncClickUp({
       state, secrets, clientId, submittedAt,
       supabaseRowId: row.id, customFields,
     });
     fieldFailures = r.fieldFailures || [];
+    const attempts = 1 + getClickupRetryCount();
+    const cuTaskId = r.task_id || null;
+    await recordAudit(supabase, {
+      form: 'campaign-intake', client_id: clientId, stage: 'clickup_sync',
+      outcome: 'ok', attempt: attempts, clickup_task_id: cuTaskId,
+      duration_ms: Date.now() - cuStart,
+      detail: fieldFailures.length
+        ? `task created; ${fieldFailures.length} field write(s) failed`
+        : 'task created + fields written',
+    });
+    await supabase.from('campaign_intakes').update({
+      clickup_task_id:  cuTaskId,
+      clickup_synced_at: new Date().toISOString(),
+      clickup_attempts: attempts,
+      clickup_error:    fieldFailures.length ? JSON.stringify(fieldFailures).slice(0, 500) : null,
+    }).eq('id', row.id);
   } catch (e) {
     console.error('[campaign-intake] ClickUp sync failed:', e);
     errors.push({ step: 'clickup', detail: String(e.message || e) });
+    const attempts = 1 + getClickupRetryCount();
+    await recordAudit(supabase, {
+      form: 'campaign-intake', client_id: clientId, stage: 'clickup_sync',
+      outcome: 'error', attempt: attempts, duration_ms: Date.now() - cuStart,
+      detail: String(e.message || e),
+    });
+    await supabase.from('campaign_intakes').update({
+      clickup_attempts: attempts,
+      clickup_error:    String(e.message || e).slice(0, 500),
+    }).eq('id', row.id);
   }
 
   // 5) Sheets webhook — best effort
+  const sheetStart = Date.now();
   await syncSheets({ state, secrets, clientId, submittedAt, supabaseRowId: row.id })
-    .catch((e) => errors.push({ step: 'sheets', detail: String(e.message || e) }));
+    .then(() => recordAudit(supabase, {
+      form: 'campaign-intake', client_id: clientId, stage: 'sheet_log',
+      outcome: 'ok', duration_ms: Date.now() - sheetStart,
+    }))
+    .catch((e) => {
+      errors.push({ step: 'sheets', detail: String(e.message || e) });
+      return recordAudit(supabase, {
+        form: 'campaign-intake', client_id: clientId, stage: 'sheet_log',
+        outcome: 'error', duration_ms: Date.now() - sheetStart,
+        detail: String(e.message || e),
+      });
+    });
 
   res.setHeader('Cache-Control', 'no-store');
   return res.status(200).json({
@@ -220,23 +269,44 @@ export default async function handler(req, res) {
 
 // ─── ClickUp helpers ───────────────────────────────────────────────────
 
+// Retry counter — incremented on every 429/5xx retry. syncClickUp() resets it
+// before its run and reads it after so the audit log can report total attempts.
+let clickupRetryCount = 0;
+export function resetClickupRetryCount() { clickupRetryCount = 0; }
+export function getClickupRetryCount() { return clickupRetryCount; }
+
 async function clickupFetch(path, opts = {}) {
   const token = process.env.CLICKUP_API_TOKEN;
   if (!token) throw new Error('CLICKUP_API_TOKEN not set');
-  const r = await fetch(`https://api.clickup.com/api/v2${path}`, {
-    ...opts,
-    headers: {
-      Authorization: token,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...(opts.headers || {}),
-    },
-  });
-  if (!r.ok) {
+  const MAX_ATTEMPTS = 4; // 1 initial + 3 retries
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const r = await fetch(`https://api.clickup.com/api/v2${path}`, {
+      ...opts,
+      headers: {
+        Authorization: token,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...(opts.headers || {}),
+      },
+    });
+    if (r.ok) return r.json();
+    // Retry on 429 (rate limit) and 5xx (transient server errors). Honor the
+    // Retry-After header when present, otherwise exponential backoff (1s/2s/4s
+    // capped at 5s) — deliberately slowing down to stay under ClickUp's limit.
+    if ((r.status === 429 || r.status >= 500) && attempt < MAX_ATTEMPTS) {
+      const retryAfter = Number(r.headers.get('Retry-After'));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 5000)
+        : Math.min(1000 * 2 ** (attempt - 1), 5000);
+      console.warn(`[clickup] ${r.status} on ${path} — retry ${attempt}/${MAX_ATTEMPTS - 1} after ${waitMs}ms`);
+      clickupRetryCount++;
+      await new Promise((res) => setTimeout(res, waitMs));
+      continue;
+    }
     const txt = await r.text();
     throw new Error(`ClickUp ${r.status} ${path}: ${txt.slice(0, 300)}`);
   }
-  return r.json();
+  throw new Error(`ClickUp request failed after ${MAX_ATTEMPTS} attempts: ${path}`);
 }
 
 /**
@@ -251,6 +321,24 @@ async function findActiveClientByClientId(clientId) {
   );
   const tasks = result.tasks || [];
   for (const t of tasks) {
+    const cf = (t.custom_fields || []).find(
+      (f) => f.name === 'Client ID' && String(f.value || '').trim() === clientId,
+    );
+    if (cf) return t;
+  }
+  return null;
+}
+
+// Find the Worker-W3 stub task in the form list for this client.
+// W3 pre-creates one task per form list at status 'to do' with Client ID +
+// Linked Client set. We patch that stub instead of creating a duplicate.
+async function findStubByClientId(listId, clientId) {
+  const result = await clickupFetch(
+    `/list/${listId}/task?include_closed=true&subtasks=false&page=0`
+  );
+  const tasks = result.tasks || [];
+  for (const t of tasks) {
+    if (t.parent) continue;
     const cf = (t.custom_fields || []).find(
       (f) => f.name === 'Client ID' && String(f.value || '').trim() === clientId,
     );
@@ -274,19 +362,36 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId, custom
   // customFields is built + persisted to the Supabase row by the caller, so
   // the Worker reconciler can heal anything dropped by the write loop below.
 
-  // Step 1: create the task WITHOUT inline custom_fields. ClickUp's inline
-  // custom_fields array silently drops fields beyond ~25-28 entries
-  // (early-array fields are the ones that get lost). Per-field POST loop
-  // below avoids that — see docs/clickup-custom-fields.md §6.
-  const newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: taskName,
-      description,
-      status: 'to do',
-      tags: [`subject:${state.subjectType}`],
-    }),
-  });
+  // Prefer the W3-created stub if it exists — patch it instead of creating
+  // a duplicate task. Falls back to create-new for manual paths where W3
+  // didn't run (e.g. direct form access without an AC parent yet).
+  const stub = await findStubByClientId(PRIMARY_LIST_ID, clientId).catch(() => null);
+  let newTask;
+  if (stub) {
+    newTask = stub;
+    // Rename the stub to the canonical form-list task name + add subject tag.
+    await clickupFetch(`/task/${newTask.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: taskName, description }),
+    }).catch((e) => console.error('[campaign-intake] stub rename failed:', e.message));
+    await clickupFetch(`/task/${newTask.id}/tag/subject:${state.subjectType}`, {
+      method: 'POST',
+    }).catch((e) => console.error('[campaign-intake] stub tag failed:', e.message));
+  } else {
+    // Step 1: create the task WITHOUT inline custom_fields. ClickUp's inline
+    // custom_fields array silently drops fields beyond ~25-28 entries
+    // (early-array fields are the ones that get lost). Per-field POST loop
+    // below avoids that — see docs/clickup-custom-fields.md §6.
+    newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: taskName,
+        description,
+        status: 'to do',
+        tags: [`subject:${state.subjectType}`],
+      }),
+    });
+  }
 
   // Step 2: write each custom field individually. Failures are logged but
   // never thrown — one bad value (e.g. a NANP-rejected phone) shouldn't
