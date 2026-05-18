@@ -329,6 +329,24 @@ async function findActiveClientByClientId(clientId) {
   return null;
 }
 
+// Find the Worker-W3 stub task in the form list for this client.
+// W3 pre-creates one task per form list at status 'to do' with Client ID +
+// Linked Client set. We patch that stub instead of creating a duplicate.
+async function findStubByClientId(listId, clientId) {
+  const result = await clickupFetch(
+    `/list/${listId}/task?include_closed=true&subtasks=false&page=0`
+  );
+  const tasks = result.tasks || [];
+  for (const t of tasks) {
+    if (t.parent) continue;
+    const cf = (t.custom_fields || []).find(
+      (f) => f.name === 'Client ID' && String(f.value || '').trim() === clientId,
+    );
+    if (cf) return t;
+  }
+  return null;
+}
+
 async function syncClickUp({ state, clientId, submittedAt, supabaseRowId, customFields }) {
   const displayName = state.displayName || state.candidateName || state.partyName || clientId;
   const taskName    = `${displayName} (${clientId}) — Campaign Intake`;
@@ -344,19 +362,36 @@ async function syncClickUp({ state, clientId, submittedAt, supabaseRowId, custom
   // customFields is built + persisted to the Supabase row by the caller, so
   // the Worker reconciler can heal anything dropped by the write loop below.
 
-  // Step 1: create the task WITHOUT inline custom_fields. ClickUp's inline
-  // custom_fields array silently drops fields beyond ~25-28 entries
-  // (early-array fields are the ones that get lost). Per-field POST loop
-  // below avoids that — see docs/clickup-custom-fields.md §6.
-  const newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: taskName,
-      description,
-      status: 'to do',
-      tags: [`subject:${state.subjectType}`],
-    }),
-  });
+  // Prefer the W3-created stub if it exists — patch it instead of creating
+  // a duplicate task. Falls back to create-new for manual paths where W3
+  // didn't run (e.g. direct form access without an AC parent yet).
+  const stub = await findStubByClientId(PRIMARY_LIST_ID, clientId).catch(() => null);
+  let newTask;
+  if (stub) {
+    newTask = stub;
+    // Rename the stub to the canonical form-list task name + add subject tag.
+    await clickupFetch(`/task/${newTask.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: taskName, description }),
+    }).catch((e) => console.error('[campaign-intake] stub rename failed:', e.message));
+    await clickupFetch(`/task/${newTask.id}/tag/subject:${state.subjectType}`, {
+      method: 'POST',
+    }).catch((e) => console.error('[campaign-intake] stub tag failed:', e.message));
+  } else {
+    // Step 1: create the task WITHOUT inline custom_fields. ClickUp's inline
+    // custom_fields array silently drops fields beyond ~25-28 entries
+    // (early-array fields are the ones that get lost). Per-field POST loop
+    // below avoids that — see docs/clickup-custom-fields.md §6.
+    newTask = await clickupFetch(`/list/${PRIMARY_LIST_ID}/task`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: taskName,
+        description,
+        status: 'to do',
+        tags: [`subject:${state.subjectType}`],
+      }),
+    });
+  }
 
   // Step 2: write each custom field individually. Failures are logged but
   // never thrown — one bad value (e.g. a NANP-rejected phone) shouldn't
