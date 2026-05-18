@@ -388,5 +388,17 @@ export function buildCustomFields(state, secrets = {}, optionsMap = {}) {
     pushField(k, secrets?.[k], fname);
   }
 
+  // Catch-all: dump the full state into "Form 1 Full Payload (JSON)" so any
+  // form keys not covered by STATE_TO_FIELD are still recoverable from the
+  // task itself. Secrets are intentionally NOT included — they go to
+  // campaign_intake_secrets with strict RLS.
+  const payloadFid = FIELD_IDS['Form 1 Full Payload (JSON)'];
+  if (payloadFid && state && !seen.has(payloadFid)) {
+    try {
+      out.push({ id: payloadFid, value: JSON.stringify(state) });
+      seen.add(payloadFid);
+    } catch { /* ignore — best effort */ }
+  }
+
   return { fields: out, unresolved };
 }
