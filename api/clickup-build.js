@@ -230,6 +230,20 @@ export async function getDropdownOptionsMap() {
 // the raw form value → the canonical ClickUp option name before resolution.
 // fieldName → { rawValueLowercased: 'Canonical ClickUp Option Name' }.
 const DROPDOWN_VALUE_ALIASES = {
+  // Form sends slug-style IDs (kebab-case); ClickUp options use display
+  // labels. Without these aliases, resolveOption returns null and the
+  // dropdown silently drops.
+  'Party Type': {
+    'republican':    'Republican',
+    'america-first': 'America-First',
+    'non-partisan':  'Non-Partisan',
+    'nonpartisan':   'Non-Partisan',
+    'independent':   'Independent',
+    'third-party':   'Third Party',
+    'thirdparty':    'Third Party',
+    'coalition':     'Coalition',
+    'other':         'Other',
+  },
   'Time Zone': {
     'america/new_york':    'Eastern (ET)',
     'america/detroit':     'Eastern (ET)',
@@ -367,6 +381,19 @@ export function buildCustomFields(state, secrets = {}, optionsMap = {}) {
         value = String(raw).trim();
       }
       if (!value) return;
+      // ClickUp's phone-type fields silently drop values that aren't E.164
+      // (e.g. "+1-555-0100" or "555-0103" come through the API as 200 OK but
+      // never appear on the task). Normalise: strip non-digits, prepend +1
+      // for 10-digit US numbers, keep an existing leading "+" intact.
+      if (type === 'phone') {
+        const hadPlus = value.trim().startsWith('+');
+        const digits = value.replace(/\D/g, '');
+        if (!digits) return;
+        if (hadPlus)              value = `+${digits}`;
+        else if (digits.length === 10) value = `+1${digits}`;
+        else if (digits.length === 11 && digits.startsWith('1')) value = `+${digits}`;
+        else                      value = `+${digits}`;
+      }
     } else if (type === 'number' || type === 'currency') {
       const n = Number(raw);
       if (!Number.isFinite(n)) return;
